@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "691505911104",
+    "project_id": "masoon-smart",
+    "storage_bucket": "masoon-smart.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:691505911104:android:e14e5578f373687c4896a5",
+        "android_client_info": {
+          "package_name": "com.example.masoon_smart"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCEn4p2TOhD7FdX6tGSPgi7WOwpJMXerxw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
