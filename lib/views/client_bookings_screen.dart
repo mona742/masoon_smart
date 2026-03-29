@@ -6,13 +6,16 @@ import '../colors.dart';
 import '../models/booking_model.dart';
 
 class ClientBookingsScreen extends StatelessWidget {
-  final String plateNumber = "1234 س ح ط ";
+  // ✅ جعلنا المتغير يستقبل قيمة من الخارج
+  final String plateNumber;
 
-  const ClientBookingsScreen({super.key});
+  // ✅ عدلنا الـ Constructor ليطلب الرقم
+  const ClientBookingsScreen({super.key, required this.plateNumber});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // ... باقي الكود كما هو تماماً ...
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: Text(

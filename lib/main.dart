@@ -1,19 +1,37 @@
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 
-import 'colors.dart'; // ملف الألوان
-import 'views/login_screen.dart'; // ✅ استدعاء شاشة الدخول بدلاً من الداشبورد مباشرة
+// ✅ 1. استيراد ملف خدمة الموقع الجديد (تأكد أن المسار صحيح)
+import 'services/background_location_service.dart';
+import 'services/notification_service.dart';
+import 'views/login_screen.dart';
+
+// ⚠️ دالة الخلفية للإشعارات (كما هي، لم نلمسها)
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+  print("Handling a background message: ${message.messageId}");
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  try {
-    await Firebase.initializeApp();
-    print("✅ تم الاتصال بـ Firebase بنجاح!");
-  } catch (e) {
-    print("❌ خطأ في الاتصال بـ Firebase: $e");
-  }
+  // 1. تشغيل الفايربيز
+  await Firebase.initializeApp();
+
+  // 2. تفعيل معالج خلفية الإشعارات
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+  // 3. تشغيل خدمة الإشعارات (كودك القديم)
+  await NotificationService().init();
+
+  // ✅ 4. تهيئة خدمة التتبع (الجي بي اس) - الإضافة الجديدة
+  // ملاحظة: هذا السطر يجهز الخدمة فقط، ولن يبدأ التتبع إلا عندما نعطي أمر Start بعد تسجيل الدخول
+  await BackgroundLocationService.initialize();
+
+  // طباعة التوكن (كودك القديم)
+  await NotificationService().getToken();
 
   runApp(const MasoonSmartApp());
 }
@@ -24,36 +42,15 @@ class MasoonSmartApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      debugShowCheckedModeBanner: false,
       title: 'Masoon Smart',
-
-      // إعداد الثيم العام
+      debugShowCheckedModeBanner: false,
       theme: ThemeData(
+        primarySwatch: Colors.blue,
         useMaterial3: true,
-        scaffoldBackgroundColor: AppColors.background,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: AppColors.primary,
-          primary: AppColors.primary,
-          secondary: AppColors.secondary,
-          error: AppColors.danger,
-          surface: AppColors.cardBg,
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: AppColors.cardBg,
-          elevation: 0,
-          centerTitle: true,
-          iconTheme: IconThemeData(color: AppColors.textDark),
-          titleTextStyle: TextStyle(
-            color: AppColors.textDark,
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        textTheme: GoogleFonts.cairoTextTheme(Theme.of(context).textTheme),
+        fontFamily: 'Cairo', // الخط العربي
       ),
-
-      // ✅ جعلنا البداية هي شاشة الدخول لتتمكن من اختيار (ورشة) أو (عميل)
-      home: LoginScreen(),
+      // الشاشة الرئيسية هي تسجيل الدخول
+      home: const LoginScreen(),
     );
   }
 }

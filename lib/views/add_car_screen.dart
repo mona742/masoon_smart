@@ -1,16 +1,26 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl_phone_field/intl_phone_field.dart'; // ✅ المكتبة المهمة
 import 'package:provider/provider.dart';
 
 import '../viewmodels/add_car_vm.dart';
 
 class AddCarScreen extends StatelessWidget {
+  const AddCarScreen({super.key});
+
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
       create: (_) => AddCarViewModel(),
       child: Scaffold(
-        appBar: AppBar(title: const Text("إضافة سيارة جديدة")),
+        appBar: AppBar(
+          title: Text(
+            "إضافة سيارة عميل",
+            style: GoogleFonts.cairo(fontWeight: FontWeight.bold),
+          ),
+          centerTitle: true,
+        ),
         backgroundColor: Colors.grey[50],
         body: Consumer<AddCarViewModel>(
           builder: (context, vm, _) {
@@ -21,17 +31,55 @@ class AddCarScreen extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // === قسم 1: بيانات العميل (الرابط الأساسي) ===
                     const Text(
-                      "بيانات المركبة الأساسية",
+                      "بيانات العميل (لمن تتبع السيارة؟)",
                       style: TextStyle(
-                        fontSize: 18,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blueGrey,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // ✅ حقل رقم جوال العميل
+                    IntlPhoneField(
+                      controller: vm.clientPhoneController,
+                      decoration: const InputDecoration(
+                        labelText: 'رقم جوال العميل',
+                        border: OutlineInputBorder(
+                          borderSide: BorderSide(),
+                          borderRadius: BorderRadius.all(Radius.circular(10)),
+                        ),
+                      ),
+                      initialCountryCode: 'SA', // السعودية افتراضي
+                      languageCode: "ar",
+                      disableLengthCheck: false,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                        LengthLimitingTextInputFormatter(
+                          9,
+                        ), // 9 أرقام (5xxxxxxxx)
+                      ],
+                      onChanged: (phone) {
+                        // هنا ممكن نضيف تحقق إضافي لو احتجنا
+                      },
+                    ),
+
+                    const Divider(height: 30, thickness: 1),
+
+                    // === قسم 2: بيانات المركبة ===
+                    const Text(
+                      "بيانات المركبة",
+                      style: TextStyle(
+                        fontSize: 16,
                         fontWeight: FontWeight.bold,
                         color: Colors.blueGrey,
                       ),
                     ),
                     const SizedBox(height: 15),
 
-                    // === قسم رقم الهيكل مع زر المسح ===
+                    // رقم الهيكل مع زر المسح
                     Row(
                       children: [
                         Expanded(
@@ -39,7 +87,7 @@ class AddCarScreen extends StatelessWidget {
                             controller: vm.vinController,
                             decoration: InputDecoration(
                               labelText: "رقم الهيكل (VIN)",
-                              hintText: "موجود على استمارة السيارة",
+                              hintText: "موجود على الاستمارة",
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(10),
                               ),
@@ -80,14 +128,14 @@ class AddCarScreen extends StatelessWidget {
 
                     const SizedBox(height: 20),
 
-                    // === الشركة والموديل ===
+                    // الشركة والموديل
                     Row(
                       children: [
                         Expanded(
                           child: DropdownButtonFormField<String>(
                             value: vm.selectedMake,
                             decoration: InputDecoration(
-                              labelText: "الشركة المصنعة",
+                              labelText: "الشركة",
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(10),
                               ),
@@ -121,7 +169,7 @@ class AddCarScreen extends StatelessWidget {
 
                     const SizedBox(height: 20),
 
-                    // === السنة ورقم اللوحة ===
+                    // السنة ورقم اللوحة
                     Row(
                       children: [
                         Expanded(
@@ -164,7 +212,7 @@ class AddCarScreen extends StatelessWidget {
 
                     const SizedBox(height: 20),
 
-                    // === العداد الحالي (أهم معلومة للصيانة) ===
+                    // العداد الحالي
                     TextFormField(
                       controller: vm.kmController,
                       keyboardType: TextInputType.number,
@@ -178,19 +226,21 @@ class AddCarScreen extends StatelessWidget {
                         fillColor: Colors.white,
                         filled: true,
                       ),
-                      validator: (val) => val!.isEmpty
-                          ? 'يرجى إدخال العداد لحساب الصيانة'
-                          : null,
+                      validator: (val) =>
+                          val!.isEmpty ? 'يرجى إدخال العداد' : null,
                     ),
 
                     const SizedBox(height: 40),
 
-                    // === زر الحفظ ===
+                    // زر الحفظ
                     SizedBox(
                       width: double.infinity,
                       height: 55,
                       child: ElevatedButton(
-                        onPressed: () => vm.saveCar(context),
+                        // ✅ ربط الزر بحالة التحميل
+                        onPressed: vm.isLoading
+                            ? null
+                            : () => vm.saveCar(context),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.blue[800],
                           foregroundColor: Colors.white,
@@ -199,13 +249,17 @@ class AddCarScreen extends StatelessWidget {
                           ),
                           elevation: 5,
                         ),
-                        child: Text(
-                          "حفظ السيارة",
-                          style: GoogleFonts.cairo(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                        child: vm.isLoading
+                            ? const CircularProgressIndicator(
+                                color: Colors.white,
+                              )
+                            : Text(
+                                "حفظ السيارة",
+                                style: GoogleFonts.cairo(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                       ),
                     ),
                   ],
@@ -218,28 +272,3 @@ class AddCarScreen extends StatelessWidget {
     );
   }
 }
-
-/*```
-
-### 3. التحديث الأخير للقائمة (main.dart)
-لا داعي لاستبدال الملف كاملاً هذه المرة، فقط انسخي هذا الجزء وأضيفيه في قائمة الأزرار داخل `main.dart`، وتحديداً داخل `MainMenuScreen`، ولا تنسي عمل `import` للملف الجديد في الأعلى.
-
-**أولاً:** في أعلى `main.dart`:
-```dart
-import 'views/add_car_screen.dart'; // <--- أضيفي هذا السطر
-```
-
-**ثانياً:** داخل قائمة الأزرار (`Column`):
-```dart
-// ... الأزرار السابقة ...
-
-const SizedBox(height: 15),
-
-// زر 5: إضافة سيارة
-_buildNavButton(
-context,
-"5. إضافة سيارة جديدة (للعميل)",
-Icons.directions_car_filled_rounded,
-Colors.indigo.shade600,
-AddCarScreen()
-),*/

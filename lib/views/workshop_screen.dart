@@ -1,141 +1,232 @@
 // lib/views/workshop_screen.dart
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
-import '../models/workshop_models.dart';
 import '../viewmodels/smart_workshop_vm.dart';
+import 'workshop_add_service_screen.dart'; // للانتقال لشاشة إضافة الخدمة
 
-class WorkshopScreen extends StatelessWidget {
+class WorkshopScreen extends StatefulWidget {
+  const WorkshopScreen({super.key});
+
+  @override
+  State<WorkshopScreen> createState() => _WorkshopScreenState();
+}
+
+class _WorkshopScreenState extends State<WorkshopScreen> {
+  final TextEditingController _searchController = TextEditingController();
+
   @override
   Widget build(BuildContext context) {
-    // استدعاء البيانات من الـ ViewModel
+    // استدعاء الـ ViewModel الحقيقي
     final vm = Provider.of<SmartWorkshopViewModel>(context);
-    final myCar = vm.cars.first;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text("تطبيق مصون"),
+        title: Text(
+          "لوحة الفني - بحث المركبات",
+          style: GoogleFonts.cairo(fontWeight: FontWeight.bold),
+        ),
         backgroundColor: Colors.blue[900],
         foregroundColor: Colors.white,
       ),
       body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // === الجزء الخاص بالورشة ===
-            Container(
-              color: Colors.grey[200],
-              padding: EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "🔧 لوحة الفني (الورشة)",
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  SizedBox(height: 10),
-                  Text("السيارة: ${myCar.make} ${myCar.model} - ${myCar.year}"),
-                  SizedBox(height: 15),
-                  ElevatedButton.icon(
-                    icon: Icon(Icons.add_task),
-                    label: Text("تسجيل تغيير زيت جديد"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange,
-                      foregroundColor: Colors.white,
-                    ),
-                    onPressed: () {
-                      // محاكاة: الفني يسجل زيت عند 105000 كم
-                      vm.addServiceRecord(
-                        myCar.id,
-                        ServiceType.oilChange,
-                        105000,
-                        "زيت 5000 كم",
-                      );
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text("تم تسجيل الخدمة بنجاح")),
-                      );
-                    },
-                  ),
-                ],
+            // === 1. شريط البحث الحقيقي ===
+            Text(
+              "🔍 ابحث عن سيارة العميل:",
+              style: GoogleFonts.cairo(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
               ),
             ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                labelText: "أدخل رقم الهيكل (VIN) هنا...",
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.search, color: Colors.blue),
+                  onPressed: () {
+                    // إغلاق لوحة المفاتيح
+                    FocusScope.of(context).unfocus();
+                    if (_searchController.text.isNotEmpty) {
+                      // استدعاء دالة الفايربيز الحقيقية
+                      vm.fetchCarDetails(
+                        _searchController.text.trim().toUpperCase(),
+                      );
+                    }
+                  },
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                filled: true,
+                fillColor: Colors.grey[100],
+              ),
+              onSubmitted: (val) {
+                if (val.isNotEmpty)
+                  vm.fetchCarDetails(val.trim().toUpperCase());
+              },
+            ),
 
-            Divider(height: 1, thickness: 2),
+            const SizedBox(height: 30),
 
-            // === الجزء الخاص بالعميل ===
-            Padding(
-              padding: EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "📱 شاشة العميل",
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.green[800],
-                    ),
-                  ),
-                  SizedBox(height: 10),
-                  Card(
-                    elevation: 4,
-                    child: Padding(
-                      padding: const EdgeInsets.all(15.0),
-                      child: Column(
+            // === 2. عرض النتائج أو حالة التحميل ===
+            if (vm.isLoading)
+              const Center(child: CircularProgressIndicator())
+            else if (vm.currentCar != null) ...[
+              // بيانات السيارة التي تم العثور عليها
+              Card(
+                elevation: 4,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
                         children: [
-                          Text(
-                            "العداد الحالي: ${myCar.currentMileage} كم",
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
+                          const Icon(
+                            Icons.directions_car,
+                            color: Colors.blueGrey,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              "${vm.currentCar!['make']} | اللوحة: ${vm.currentCar!['plate']}",
+                              style: GoogleFonts.cairo(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
-                          ),
-                          Slider(
-                            min: 100000,
-                            max: 110000,
-                            value: myCar.currentMileage.toDouble(),
-                            label: "تحديث العداد",
-                            onChanged: (val) {
-                              vm.updateMileage(myCar.id, val.toInt());
-                            },
-                          ),
-                          Text(
-                            "حرك الشريط لمحاكاة مشي السيارة",
-                            style: TextStyle(fontSize: 12, color: Colors.grey),
                           ),
                         ],
                       ),
-                    ),
-                  ),
-                  SizedBox(height: 20),
-                  Text(
-                    "التنبيهات:",
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
+                      const Divider(height: 20, thickness: 1),
+                      Text(
+                        "العميل: ${vm.currentCar!['clientName'] ?? 'غير مسجل'}",
+                        style: GoogleFonts.cairo(fontSize: 16),
+                      ),
+                      Text(
+                        "الممشى الحالي (GPS): ${vm.currentCar!['currentKm']} كم",
+                        style: GoogleFonts.cairo(
+                          fontSize: 16,
+                          color: Colors.blue[800],
+                        ),
+                      ),
+                      const SizedBox(height: 20),
 
-                  // عرض التنبيهات
-                  if (vm.alerts.isEmpty)
-                    Text("لا توجد تنبيهات حالياً")
-                  else
-                    ...vm.alerts
-                        .map(
-                          (alert) => Container(
-                            margin: EdgeInsets.only(top: 8),
-                            padding: EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: alert.contains("⚠️")
-                                  ? Colors.red[100]
-                                  : Colors.green[100],
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              children: [Expanded(child: Text(alert))],
+                      // زر الانتقال لتسجيل صيانة حقيقية
+                      SizedBox(
+                        width: double.infinity,
+                        height: 50,
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.build),
+                          label: Text(
+                            "تسجيل خدمة وصيانة",
+                            style: GoogleFonts.cairo(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
                             ),
                           ),
-                        )
-                        .toList(),
-                ],
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.orange,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                // نمرر الداتا عشان ما يكتبها الفني من جديد
+                                builder: (context) => WorkshopAddServiceScreen(
+                                  carData: vm.currentCar,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ),
+
+              const SizedBox(height: 25),
+
+              // === 3. التنبيهات الذكية للورشة ===
+              Text(
+                "📊 حالة السيارة بناءً على سجل الفايربيز:",
+                style: GoogleFonts.cairo(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 10),
+              if (vm.alerts.isEmpty)
+                Text(
+                  "لا توجد بيانات كافية.",
+                  style: GoogleFonts.cairo(color: Colors.grey),
+                )
+              else
+                ...vm.alerts
+                    .map(
+                      (alert) => Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(15),
+                        decoration: BoxDecoration(
+                          color: alert.contains("⚠️")
+                              ? Colors.red[50]
+                              : (alert.contains("✅")
+                                    ? Colors.green[50]
+                                    : Colors.blue[50]),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: alert.contains("⚠️")
+                                ? Colors.red.shade200
+                                : (alert.contains("✅")
+                                      ? Colors.green.shade200
+                                      : Colors.blue.shade200),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                alert,
+                                style: GoogleFonts.cairo(
+                                  color: alert.contains("⚠️")
+                                      ? Colors.red[900]
+                                      : Colors.black87,
+                                  fontWeight: alert.contains("⚠️")
+                                      ? FontWeight.bold
+                                      : FontWeight.normal,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                    .toList(),
+            ] else if (_searchController.text.isNotEmpty)
+              Center(
+                child: Text(
+                  "لم يتم العثور على سيارة بهذا الرقم.",
+                  style: GoogleFonts.cairo(
+                    color: Colors.red,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
           ],
         ),
       ),

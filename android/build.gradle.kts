@@ -3,10 +3,6 @@ allprojects {
         google()
         mavenCentral()
     }
-    dependencies {
-        // لاحظ الأقواس وعلامات التنصيص المزدوجة (هذا هو فرق Kotlin)
-        id("com.google.gms.google-services") version "4.4.4" apply false
-    }
 }
 
 val newBuildDir: Directory =

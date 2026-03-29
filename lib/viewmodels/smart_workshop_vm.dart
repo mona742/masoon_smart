@@ -1,94 +1,96 @@
 // lib/viewmodels/smart_workshop_vm.dart
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
-import '../models/workshop_models.dart';
-
 class SmartWorkshopViewModel extends ChangeNotifier {
-  // بيانات تجريبية (سيارة كامري)
-  List<Car> cars = [
-    Car(
-      id: 'c1',
-      vin: 'ABC123456',
-      make: 'Toyota',
-      model: 'Camry',
-      year: 2018,
-      currentMileage: 104500,
-    ),
-  ];
-
-  List<ServiceRecord> servicesHistory = [];
+  bool isLoading = false;
+  Map<String, dynamic>? currentCar;
+  List<Map<String, dynamic>> servicesHistory = [];
   List<String> alerts = [];
 
-  // دالة الورشة لإضافة خدمة
-  void addServiceRecord(
-    String carId,
-    ServiceType type,
-    int currentKm,
-    String notes,
-  ) {
-    // إضافة السجل
-    final newRecord = ServiceRecord(
-      id: DateTime.now().toString(),
-      carId: carId,
-      type: type,
-      cost: 150.0,
-      mileageAtService: currentKm,
-      date: DateTime.now(),
-      notes: notes,
-    );
-    servicesHistory.add(newRecord);
+  /// جلب بيانات سيارة معينة وسجل صیانتها من الفايربيز
+  Future<void> fetchCarDetails(String carId) async {
+    isLoading = true;
+    notifyListeners();
 
-    // تحديث عداد السيارة
-    final carIndex = cars.indexWhere((c) => c.id == carId);
-    if (carIndex != -1) {
-      cars[carIndex].currentMileage = currentKm;
-      // حساب التنبيهات فوراً
-      calculateMaintenanceAlerts(cars[carIndex]);
+    try {
+      // 1. جلب بيانات السيارة الأساسية
+      final carDoc = await FirebaseFirestore.instance
+          .collection('cars')
+          .doc(carId)
+          .get();
+
+      if (carDoc.exists) {
+        currentCar = carDoc.data();
+
+        // 2. جلب سجل الخدمات المرتبط بهذه السيارة (مرتبة من الأحدث للأقدم)
+        final servicesQuery = await FirebaseFirestore.instance
+            .collection('services')
+            .where('carId', isEqualTo: carId)
+            .orderBy('createdAt', descending: true)
+            .get();
+
+        servicesHistory = servicesQuery.docs.map((doc) => doc.data()).toList();
+
+        // 3. حساب التنبيهات الذكية بناءً على البيانات الحقيقية
+        _calculateAlerts();
+      } else {
+        currentCar = null;
+        servicesHistory = [];
+        alerts = ["⚠️ السيارة غير مسجلة في النظام."];
+      }
+    } catch (e) {
+      print("Error fetching car details: $e");
+      alerts = ["❌ حدث خطأ أثناء جلب بيانات السيارة."];
     }
 
-    notifyListeners(); // تحديث الشاشة
+    isLoading = false;
+    notifyListeners();
   }
 
-  // خوارزمية حساب التنبيهات
-  void calculateMaintenanceAlerts(Car car) {
+  /// خوارزمية حساب التنبيهات بناءً على الفايربيز
+  void _calculateAlerts() {
     alerts.clear();
+    if (currentCar == null) return;
 
-    // البحث عن آخر تغيير زيت
-    var lastOilChange = servicesHistory.lastWhere(
-      (s) => s.carId == car.id && s.type == ServiceType.oilChange,
-      orElse: () => ServiceRecord(
-        id: '0',
-        carId: '0',
-        type: ServiceType.other,
-        cost: 0,
-        mileageAtService: 0,
-        date: DateTime(2000),
-      ),
-    );
+    // استخراج الممشى الحالي من بيانات السيارة
+    double currentKm =
+        double.tryParse(currentCar!['currentKm'].toString()) ?? 0.0;
 
-    if (lastOilChange.id != '0') {
-      int nextDue = lastOilChange.expectedNextServiceMileage;
-      int remaining = nextDue - car.currentMileage;
+    // البحث عن آخر خدمة "تغيير زيت" في السجل
+    var oilServices = servicesHistory.where((s) => s['type'] == 'oil').toList();
+
+    if (oilServices.isNotEmpty) {
+      var lastOil = oilServices.first;
+      double limit = double.tryParse(lastOil['limitKm'].toString()) ?? 5000.0;
+      double lastKm =
+          double.tryParse(lastOil['lastChangeKm'].toString()) ?? 0.0;
+
+      double remaining = (lastKm + limit) - currentKm;
 
       if (remaining <= 0) {
         alerts.add(
-          "⚠️ تنبيه عاجل: تجاوزت موعد تغيير الزيت بـ ${remaining.abs()} كم!",
+          "⚠️ تنبيه عاجل: تجاوزت السيارة موعد تغيير الزيت بـ ${remaining.abs().toInt()} كم!",
         );
-      } else if (remaining <= 500) {
-        alerts.add("🔔 تذكير: باقي $remaining كم على الزيت.");
+      } else if (remaining <= 1000) {
+        alerts.add(
+          "🔔 تذكير: باقي ${remaining.toInt()} كم على موعد تغيير الزيت.",
+        );
       } else {
-        alerts.add("✅ حالة الزيت ممتازة. الموعد القادم بعد $remaining كم.");
+        alerts.add("✅ حالة الزيت جيدة (متبقي ${remaining.toInt()} كم).");
       }
     } else {
-      alerts.add("ℹ️ لا يوجد سجل سابق لتغيير الزيت.");
+      alerts.add("ℹ️ لا يوجد سجل سابق لتغيير الزيت لهذه السيارة.");
     }
+
+    // يمكننا لاحقاً إضافة شروط مشابهة للكفرات والمكيف بناءً على lifeSpanMonths
   }
 
-  // دالة لتحديث العداد يدوياً (للتجربة)
-  void updateMileage(String carId, int newMileage) {
-    final car = cars.firstWhere((c) => c.id == carId);
-    car.currentMileage = newMileage;
-    calculateMaintenanceAlerts(car);
+  /// مسح البيانات عند الخروج من الشاشة
+  void clearData() {
+    currentCar = null;
+    servicesHistory.clear();
+    alerts.clear();
     notifyListeners();
   }
 }
