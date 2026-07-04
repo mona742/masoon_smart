@@ -1,3 +1,4 @@
+// lib/views/client_bookings_screen.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -6,16 +7,13 @@ import '../colors.dart';
 import '../models/booking_model.dart';
 
 class ClientBookingsScreen extends StatelessWidget {
-  // ✅ جعلنا المتغير يستقبل قيمة من الخارج
   final String plateNumber;
 
-  // ✅ عدلنا الـ Constructor ليطلب الرقم
   const ClientBookingsScreen({super.key, required this.plateNumber});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // ... باقي الكود كما هو تماماً ...
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: Text(
@@ -31,12 +29,11 @@ class ClientBookingsScreen extends StatelessWidget {
         stream: FirebaseFirestore.instance
             .collection('bookings')
             .where('plateNumber', isEqualTo: plateNumber)
-            // حذفنا الترتيب مؤقتاً لتفادي مشكلة الفهرسة
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(
-              child: CircularProgressIndicator(color: AppColors.primary),
+              child: CircularProgressIndicator(color: AppColors.primaryDark),
             );
           }
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
@@ -59,9 +56,12 @@ class ClientBookingsScreen extends StatelessWidget {
             );
           }
 
-          final bookings = snapshot.data!.docs.map((doc) {
-            return BookingModel.fromFirestore(doc);
-          }).toList();
+          final bookings = snapshot.data!.docs
+              .map((doc) => BookingModel.fromFirestore(doc))
+              .toList();
+
+          // ترتيب من الأحدث للأقدم
+          bookings.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
           return ListView.builder(
             padding: const EdgeInsets.all(20),
@@ -87,21 +87,25 @@ class ClientBookingsScreen extends StatelessWidget {
         statusIcon = Icons.check_circle;
         break;
       case 'rejected':
+      case 'rejected_notified':
         statusColor = Colors.red;
         statusText = "نعتذر، الحجز مرفوض ❌";
         statusIcon = Icons.cancel;
         break;
       default:
-        statusColor = const Color(0xFFF59E0B);
+        statusColor = const Color(0xFFF59E0B); // برتقالي
         statusText = "بانتظار الموافقة ⏳";
         statusIcon = Icons.hourglass_empty;
     }
 
     return Card(
       margin: const EdgeInsets.only(bottom: 15),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-      elevation: 3,
-      shadowColor: Colors.black12,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(15),
+        // ✅ إضافة Border صريح لتوضيح حدود البطاقة وتصحيح التداخل
+        side: BorderSide(color: Colors.grey.shade200, width: 1.5),
+      ),
+      elevation: 1, // ✅ تقليل الظل لتخفيف الزحمة البصرية
       child: Padding(
         padding: const EdgeInsets.all(15.0),
         child: Column(
@@ -109,12 +113,14 @@ class ClientBookingsScreen extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  booking.serviceName,
-                  style: GoogleFonts.tajawal(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.textDark,
+                Expanded(
+                  child: Text(
+                    booking.serviceName,
+                    style: GoogleFonts.tajawal(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textDark,
+                    ),
                   ),
                 ),
                 Icon(statusIcon, color: statusColor),
@@ -148,7 +154,6 @@ class ClientBookingsScreen extends StatelessWidget {
             ),
             const SizedBox(height: 15),
 
-            // شريط الحالة
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
@@ -168,7 +173,6 @@ class ClientBookingsScreen extends StatelessWidget {
               ),
             ),
 
-            // ✅ زر الإلغاء (يظهر فقط إذا كانت الحالة "انتظار")
             if (booking.status == 'pending') ...[
               const SizedBox(height: 15),
               SizedBox(
@@ -198,7 +202,6 @@ class ClientBookingsScreen extends StatelessWidget {
     );
   }
 
-  // ✅ دالة تأكيد الحذف
   void _confirmCancel(BuildContext context, String bookingId) {
     showDialog(
       context: context,
@@ -218,13 +221,11 @@ class ClientBookingsScreen extends StatelessWidget {
           ),
           TextButton(
             onPressed: () async {
-              Navigator.pop(ctx); // إغلاق الديالوج
-              // حذف من الفايربيز
+              Navigator.pop(ctx);
               await FirebaseFirestore.instance
                   .collection('bookings')
                   .doc(bookingId)
                   .delete();
-
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(

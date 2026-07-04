@@ -3,108 +3,166 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../colors.dart';
-import '../models/booking_model.dart'; // تأكد من وجود الموديل
+import '../models/booking_model.dart';
 
+// ✅ جعلنا الشاشة تستقبل معرف الورشة لتجلب طلباتها فقط!
 class WorkshopBookingsScreen extends StatelessWidget {
-  const WorkshopBookingsScreen({super.key});
+  final String workshopId;
+
+  const WorkshopBookingsScreen({super.key, required this.workshopId});
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: Text(
-          "طلبات الحجز الواردة",
-          style: GoogleFonts.cairo(fontWeight: FontWeight.bold),
+    return DefaultTabController(
+      length: 2, // عدد التبويبات
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          title: Text(
+            "إدارة الحجوزات",
+            style: GoogleFonts.cairo(fontWeight: FontWeight.bold),
+          ),
+          centerTitle: true,
+          backgroundColor: AppColors.cardBg,
+          foregroundColor: AppColors.textDark,
+          elevation: 0,
+          bottom: TabBar(
+            labelColor: AppColors.primary,
+            unselectedLabelColor: Colors.grey,
+            indicatorColor: AppColors.primary,
+            labelStyle: GoogleFonts.cairo(fontWeight: FontWeight.bold),
+            tabs: const [
+              Tab(text: "الطلبات الجديدة 🔔"),
+              Tab(text: "الأرشيف السجل 📁"),
+            ],
+          ),
         ),
-        centerTitle: true,
-        backgroundColor: AppColors.cardBg,
-        foregroundColor: AppColors.textDark,
-        elevation: 0,
-      ),
-      body: StreamBuilder<QuerySnapshot>(
-        // نستمع لجدول الحجوزات، ونرتبها حسب تاريخ الإنشاء (الأحدث أولاً)
-        stream: FirebaseFirestore.instance
-            .collection('bookings')
-            .orderBy('createdAt', descending: true)
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.calendar_today_outlined,
-                    size: 60,
-                    color: Colors.grey,
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    "لا توجد طلبات حجز حالياً",
-                    style: GoogleFonts.cairo(fontSize: 16, color: Colors.grey),
-                  ),
-                ],
-              ),
+        body: StreamBuilder<QuerySnapshot>(
+          // ✅ الفلترة السحرية: اجلب فقط الحجوزات الخاصة بهذه الورشة!
+          stream: FirebaseFirestore.instance
+              .collection('bookings')
+              .where('workshopId', isEqualTo: workshopId)
+              .snapshots(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(
+                child: CircularProgressIndicator(color: AppColors.primary),
+              );
+            }
+            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+              return _buildEmptyState();
+            }
+
+            // تحويل البيانات ثم ترتيبها محلياً (الأحدث أولاً) لتجنب أخطاء فهارس الفايربيز
+            List<BookingModel> allBookings = snapshot.data!.docs
+                .map((doc) => BookingModel.fromFirestore(doc))
+                .toList();
+            allBookings.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+            // تقسيم الحجوزات إلى قائمتين
+            List<BookingModel> pendingBookings = allBookings
+                .where((b) => b.status == 'pending')
+                .toList();
+            List<BookingModel> historyBookings = allBookings
+                .where((b) => b.status != 'pending')
+                .toList();
+
+            return TabBarView(
+              children: [
+                // التبويب 1: الطلبات المعلقة
+                pendingBookings.isEmpty
+                    ? _buildEmptyState("لا توجد طلبات جديدة")
+                    : ListView.builder(
+                        padding: const EdgeInsets.all(20),
+                        itemCount: pendingBookings.length,
+                        itemBuilder: (context, index) => _buildBookingCard(
+                          context,
+                          pendingBookings[index],
+                          isPending: true,
+                        ),
+                      ),
+
+                // التبويب 2: الأرشيف (سجل الحجوزات المقبولة والمرفوضة)
+                historyBookings.isEmpty
+                    ? _buildEmptyState("سجل الحجوزات فارغ")
+                    : ListView.builder(
+                        padding: const EdgeInsets.all(20),
+                        itemCount: historyBookings.length,
+                        itemBuilder: (context, index) => _buildBookingCard(
+                          context,
+                          historyBookings[index],
+                          isPending: false,
+                        ),
+                      ),
+              ],
             );
-          }
-
-          final bookings = snapshot.data!.docs.map((doc) {
-            return BookingModel.fromFirestore(doc);
-          }).toList();
-
-          return ListView.builder(
-            padding: const EdgeInsets.all(20),
-            itemCount: bookings.length,
-            itemBuilder: (context, index) {
-              return _buildBookingCard(context, bookings[index]);
-            },
-          );
-        },
+          },
+        ),
       ),
     );
   }
 
-  Widget _buildBookingCard(BuildContext context, BookingModel booking) {
+  // رسالة الحالة الفارغة
+  Widget _buildEmptyState([String msg = "لا توجد طلبات حجز حالياً"]) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.inbox_outlined, size: 80, color: Colors.grey.shade300),
+          const SizedBox(height: 15),
+          Text(msg, style: GoogleFonts.cairo(fontSize: 16, color: Colors.grey)),
+        ],
+      ),
+    );
+  }
+
+  // تصميم الكارت المحدث (أنيق، بحدود متناسقة، وبدون تشوه)
+  Widget _buildBookingCard(
+    BuildContext context,
+    BookingModel booking, {
+    required bool isPending,
+  }) {
     Color statusColor;
     String statusText;
 
-    // تحديد لون وحالة النص بناءً على status
     switch (booking.status) {
       case 'confirmed':
         statusColor = Colors.green;
-        statusText = "مقبول ✅";
+        statusText = "تم القبول ✅";
         break;
       case 'rejected':
+      case 'rejected_notified': // كلاهما يعامل كمرفوض في واجهة الورشة
         statusColor = Colors.red;
         statusText = "مرفوض ❌";
         break;
       default:
-        statusColor = AppColors.secondary;
+        statusColor = Colors.orange;
         statusText = "قيد الانتظار ⏳";
     }
 
     return Card(
       margin: const EdgeInsets.only(bottom: 15),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(15),
+        side: BorderSide(color: Colors.grey.shade200), // حدود متناسقة وناعمة
+      ),
       elevation: 2,
+      shadowColor: Colors.black12,
       child: Padding(
         padding: const EdgeInsets.all(15.0),
         child: Column(
           children: [
-            // الرأس: الخدمة والحالة
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  booking.serviceName,
-                  style: GoogleFonts.tajawal(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.textDark,
+                Expanded(
+                  child: Text(
+                    booking.serviceName,
+                    style: GoogleFonts.tajawal(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textDark,
+                    ),
                   ),
                 ),
                 Container(
@@ -128,13 +186,14 @@ class WorkshopBookingsScreen extends StatelessWidget {
                 ),
               ],
             ),
-            const Divider(height: 25),
-
-            // التفاصيل
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 10),
+              child: Divider(height: 1, thickness: 1),
+            ),
             _buildInfoRow(Icons.person, "العميل", booking.clientName),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             _buildInfoRow(Icons.directions_car, "اللوحة", booking.plateNumber),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             _buildInfoRow(
               Icons.access_time,
               "الموعد",
@@ -142,17 +201,25 @@ class WorkshopBookingsScreen extends StatelessWidget {
             ),
 
             if (booking.notes.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              _buildInfoRow(Icons.note, "ملاحظات", booking.notes),
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: _buildInfoRow(Icons.note, "ملاحظات", booking.notes),
+              ),
             ],
 
-            // أزرار التحكم (تظهر فقط إذا كانت الحالة "قيد الانتظار")
-            if (booking.status == 'pending') ...[
+            // الأزرار تظهر فقط في تبويب الطلبات المعلقة
+            if (isPending) ...[
               const SizedBox(height: 20),
               Row(
                 children: [
                   Expanded(
-                    child: ElevatedButton(
+                    child: ElevatedButton.icon(
                       onPressed: () => _updateBookingStatus(
                         context,
                         booking.id,
@@ -160,37 +227,36 @@ class WorkshopBookingsScreen extends StatelessWidget {
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
                         ),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
-                      child: Text(
+                      icon: const Icon(Icons.check, size: 18),
+                      label: Text(
                         "قبول",
-                        style: GoogleFonts.cairo(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: GoogleFonts.cairo(fontWeight: FontWeight.bold),
                       ),
                     ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: ElevatedButton(
+                    child: OutlinedButton.icon(
                       onPressed: () =>
                           _updateBookingStatus(context, booking.id, 'rejected'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red.shade100,
-                        elevation: 0,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.red,
+                        side: const BorderSide(color: Colors.red),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10),
                         ),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
-                      child: Text(
+                      icon: const Icon(Icons.close, size: 18),
+                      label: Text(
                         "رفض",
-                        style: GoogleFonts.cairo(
-                          color: Colors.red,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: GoogleFonts.cairo(fontWeight: FontWeight.bold),
                       ),
                     ),
                   ),
@@ -205,12 +271,13 @@ class WorkshopBookingsScreen extends StatelessWidget {
 
   Widget _buildInfoRow(IconData icon, String label, String value) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, size: 16, color: Colors.grey),
+        Icon(icon, size: 18, color: Colors.grey),
         const SizedBox(width: 8),
         Text(
           "$label: ",
-          style: GoogleFonts.cairo(fontSize: 12, color: Colors.grey),
+          style: GoogleFonts.cairo(fontSize: 13, color: Colors.grey),
         ),
         Expanded(
           child: Text(
@@ -226,7 +293,6 @@ class WorkshopBookingsScreen extends StatelessWidget {
     );
   }
 
-  // دالة تحديث الحالة في الفايربيز
   Future<void> _updateBookingStatus(
     BuildContext context,
     String docId,
@@ -238,7 +304,12 @@ class WorkshopBookingsScreen extends StatelessWidget {
       );
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text("تم تحديث الحالة بنجاح 👍", style: GoogleFonts.cairo()),
+          content: Text(
+            newStatus == 'confirmed'
+                ? "تم قبول الموعد بنجاح ✅"
+                : "تم رفض الموعد ❌",
+            style: GoogleFonts.cairo(),
+          ),
         ),
       );
     } catch (e) {

@@ -1,13 +1,16 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../colors.dart';
+import 'add_part_screen.dart';
 import 'login_screen.dart';
 import 'workshop_add_service_screen.dart';
 import 'workshop_bookings_screen.dart';
-import 'workshop_car_profile_screen.dart'; // ✅ تأكد أن هذا الملف موجود
+import 'workshop_car_profile_screen.dart';
 
 class WorkshopHomeScreen extends StatefulWidget {
   final String workshopId;
@@ -24,11 +27,61 @@ class WorkshopHomeScreen extends StatefulWidget {
 }
 
 class _WorkshopHomeScreenState extends State<WorkshopHomeScreen> {
-  // متغيرات البحث
   final TextEditingController _searchController = TextEditingController();
   List<DocumentSnapshot> _searchResults = [];
   bool _isSearching = false;
   String _searchError = '';
+
+  // 🔴 مستمع ذكي للتنبيهات الفورية
+  StreamSubscription? _notificationsSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _listenForNewBookings();
+  }
+
+  // دالة لمراقبة الطلبات الجديدة وعرض إشعار فوري للورشة
+  void _listenForNewBookings() {
+    _notificationsSub = FirebaseFirestore.instance
+        .collection('bookings')
+        .where('workshopId', isEqualTo: widget.workshopId)
+        .where('status', isEqualTo: 'pending')
+        .snapshots()
+        .listen((snapshot) {
+          for (var change in snapshot.docChanges) {
+            if (change.type == DocumentChangeType.added) {
+              // جلب وقت الإنشاء لمعرفة ما إذا كان الطلب جديداً جداً (آخر دقيقتين)
+              final data = change.doc.data() as Map<String, dynamic>;
+              final createdAtTs = data['createdAt'] as Timestamp?;
+              if (createdAtTs != null) {
+                final diff = DateTime.now()
+                    .difference(createdAtTs.toDate())
+                    .inMinutes;
+                if (diff <= 2 && mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      backgroundColor: Colors.orange.shade800,
+                      content: Text(
+                        "🔔 يوجد طلب حجز جديد بانتظار موافقتك!",
+                        style: GoogleFonts.cairo(fontWeight: FontWeight.bold),
+                      ),
+                      duration: const Duration(seconds: 4),
+                    ),
+                  );
+                }
+              }
+            }
+          }
+        });
+  }
+
+  @override
+  void dispose() {
+    _notificationsSub?.cancel(); // إيقاف المستمع عند الخروج
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -48,12 +101,10 @@ class _WorkshopHomeScreenState extends State<WorkshopHomeScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.logout, color: AppColors.danger),
-            onPressed: () {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => const LoginScreen()),
-              );
-            },
+            onPressed: () => Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const LoginScreen()),
+            ),
           ),
         ],
       ),
@@ -62,7 +113,6 @@ class _WorkshopHomeScreenState extends State<WorkshopHomeScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // الترحيب
             Text(
               "أهلاً بك 👋",
               style: GoogleFonts.cairo(
@@ -78,20 +128,15 @@ class _WorkshopHomeScreenState extends State<WorkshopHomeScreen> {
             ),
             const SizedBox(height: 30),
 
-            // ==========================================
-            // 1. الزر الرئيسي: تسجيل خدمة صيانة
-            // ==========================================
+            // 1. تسجيل خدمة صيانة
             GestureDetector(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => WorkshopAddServiceScreen(
-                      workshopId: widget.workshopId, // تمرير الهوية
-                    ),
-                  ),
-                );
-              },
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) =>
+                      WorkshopAddServiceScreen(workshopId: widget.workshopId),
+                ),
+              ),
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(25),
@@ -136,9 +181,7 @@ class _WorkshopHomeScreenState extends State<WorkshopHomeScreen> {
 
             const SizedBox(height: 20),
 
-            // ==========================================
-            // 2. زر البحث: قائمة العملاء
-            // ==========================================
+            // 2. البحث
             GestureDetector(
               onTap: () => _showSearchSheet(context),
               child: Container(
@@ -192,16 +235,53 @@ class _WorkshopHomeScreenState extends State<WorkshopHomeScreen> {
 
             const SizedBox(height: 20),
 
-            // زر الحجوزات
+            // 🔴 3. زر الحجوزات مع البادج (الشارة الحمراء للطلبات المعلقة)
+            StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('bookings')
+                  .where(
+                    'workshopId',
+                    isEqualTo: widget.workshopId,
+                  ) // فلترة خاصة بالورشة
+                  .where('status', isEqualTo: 'pending')
+                  .snapshots(),
+              builder: (context, snapshot) {
+                int pendingCount = snapshot.hasData
+                    ? snapshot.data!.docs.length
+                    : 0;
+                return _buildListTile(
+                  "طلبات الحجز",
+                  "إدارة المواعيد القادمة",
+                  Icons.calendar_month,
+                  () {
+                    Navigator.push(
+                      context,
+                      // ✅ تمرير رقم الورشة للشاشة
+                      MaterialPageRoute(
+                        builder: (context) => WorkshopBookingsScreen(
+                          workshopId: widget.workshopId,
+                        ),
+                      ),
+                    );
+                  },
+                  badgeCount: pendingCount, // تمرير العدد
+                );
+              },
+            ),
+
+            const SizedBox(height: 20),
+
+            // 4. إدارة المتجر
             _buildListTile(
-              "طلبات الحجز",
-              "إدارة المواعيد القادمة",
-              Icons.calendar_month,
+              "إدارة المتجر والعروض",
+              "إضافة قطع غيار وعروض مخصصة لعملائك",
+              Icons.storefront,
               () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => const WorkshopBookingsScreen(),
+                    builder: (context) =>
+                        AddPartScreen(workshopId: widget.workshopId),
                   ),
                 );
               },
@@ -209,7 +289,7 @@ class _WorkshopHomeScreenState extends State<WorkshopHomeScreen> {
 
             const SizedBox(height: 20),
 
-            // الإحصائيات (بتصميم مرن)
+            // 5. الإحصائيات
             Row(
               children: [
                 Expanded(
@@ -221,14 +301,8 @@ class _WorkshopHomeScreenState extends State<WorkshopHomeScreen> {
                   ),
                 ),
                 const SizedBox(width: 15),
-                // ✅ هنا التعديل: استخدام رمز الريال المدمج
                 Expanded(
-                  child: _buildStatCard(
-                    "إجمالي الدخل",
-                    "0",
-                    "﷼", // رمز الريال السعودي المتداخل
-                    Colors.green,
-                  ),
+                  child: _buildStatCard("إجمالي الدخل", "0", "﷼", Colors.green),
                 ),
               ],
             ),
@@ -238,62 +312,14 @@ class _WorkshopHomeScreenState extends State<WorkshopHomeScreen> {
     );
   }
 
-  // --- Widgets مساعدة ---
-
-  // ✅ دالة البطاقة المعدلة لتقبل (IconData) أو (String)
-  Widget _buildStatCard(
-    String title,
-    String value,
-    Object icon, // غيرنا النوع ليقبل نص أو أيقونة
-    Color color,
-  ) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(15),
-        boxShadow: [
-          BoxShadow(color: Colors.grey.withOpacity(0.1), blurRadius: 5),
-        ],
-      ),
-      child: Column(
-        children: [
-          // فحص نوع الأيقونة: إذا كانت أيقونة نعرضها، وإذا نص نعرضه كرمز
-          icon is IconData
-              ? Icon(icon, color: color, size: 28)
-              : Text(
-                  icon.toString(),
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    color: color,
-                    fontFamily: 'Arial', // خط يدعم الرموز جيداً
-                  ),
-                ),
-          const SizedBox(height: 10),
-          Text(
-            value,
-            style: GoogleFonts.tajawal(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textDark,
-            ),
-          ),
-          Text(
-            title,
-            style: GoogleFonts.cairo(fontSize: 12, color: AppColors.textLight),
-          ),
-        ],
-      ),
-    );
-  }
-
+  // تحديث دالة الأزرار لتدعم الشارة الحمراء (Badge)
   Widget _buildListTile(
     String title,
     String subtitle,
     IconData icon,
-    VoidCallback onTap,
-  ) {
+    VoidCallback onTap, {
+    int badgeCount = 0,
+  }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -306,13 +332,38 @@ class _WorkshopHomeScreenState extends State<WorkshopHomeScreen> {
         ),
         child: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: AppColors.secondary.withOpacity(0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: AppColors.secondary),
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.secondary.withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, color: AppColors.secondary),
+                ),
+                if (badgeCount > 0)
+                  Positioned(
+                    top: -5,
+                    right: -5,
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text(
+                        badgeCount.toString(),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
             const SizedBox(width: 15),
             Expanded(
@@ -344,7 +395,7 @@ class _WorkshopHomeScreenState extends State<WorkshopHomeScreen> {
     );
   }
 
-  // --- منطق البحث (قائمة العملاء) ---
+  // --- منطق البحث كما هو ---
   void _showSearchSheet(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -373,7 +424,6 @@ class _WorkshopHomeScreenState extends State<WorkshopHomeScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
-
                   TextField(
                     controller: _searchController,
                     keyboardType: TextInputType.number,
@@ -396,19 +446,13 @@ class _WorkshopHomeScreenState extends State<WorkshopHomeScreen> {
                       ),
                     ),
                   ),
-
                   const SizedBox(height: 20),
-
                   if (_isSearching)
                     const CircularProgressIndicator()
                   else if (_searchError.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Text(
-                        _searchError,
-                        style: const TextStyle(color: Colors.red),
-                        textAlign: TextAlign.center,
-                      ),
+                    Text(
+                      _searchError,
+                      style: const TextStyle(color: Colors.red),
                     )
                   else if (_searchResults.isNotEmpty)
                     Flexible(
@@ -428,41 +472,32 @@ class _WorkshopHomeScreenState extends State<WorkshopHomeScreen> {
                                 size: 35,
                               ),
                               title: Text(
-                                "${data['make'] ?? 'غير محدد'} ${data['model'] ?? ''}",
+                                "${data['make'] ?? ''} ${data['model'] ?? ''}",
                                 style: const TextStyle(
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
-                              subtitle: Text(
-                                "اللوحة: ${data['plate']} \nالمالك: ${data['ownerPhone']}",
-                              ),
+                              subtitle: Text("اللوحة: ${data['plate']}"),
                               trailing: ElevatedButton(
                                 onPressed: () {
                                   Navigator.pop(context);
                                   Navigator.push(
                                     context,
                                     MaterialPageRoute(
-                                      builder: (context) =>
-                                          WorkshopCarProfileScreen(
-                                            carData: data,
-                                            workshopId: widget.workshopId,
-                                          ),
+                                      builder: (_) => WorkshopCarProfileScreen(
+                                        carData: data,
+                                        workshopId: widget.workshopId,
+                                      ),
                                     ),
                                   );
                                 },
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.blueGrey,
-                                  foregroundColor: Colors.white,
-                                ),
                                 child: const Text("ملف السيارة"),
                               ),
                             );
                           },
                         ),
                       ),
-                    )
-                  else
-                    const SizedBox(height: 50),
+                    ),
                   const SizedBox(height: 20),
                 ],
               );
@@ -483,46 +518,78 @@ class _WorkshopHomeScreenState extends State<WorkshopHomeScreen> {
       setStateSheet(() => _searchError = "الرقم قصير جداً");
       return;
     }
-
     setStateSheet(() {
       _isSearching = true;
       _searchError = '';
       _searchResults = [];
     });
-
     try {
       var snapshot = await FirebaseFirestore.instance
           .collection('cars')
           .where('ownerPhone', isEqualTo: input)
           .get();
-
-      if (snapshot.docs.isEmpty) {
+      if (snapshot.docs.isEmpty)
         snapshot = await FirebaseFirestore.instance
             .collection('cars')
             .where('ownerPhone', isEqualTo: "0$input")
             .get();
-      }
-
-      if (snapshot.docs.isEmpty) {
+      if (snapshot.docs.isEmpty)
         snapshot = await FirebaseFirestore.instance
             .collection('cars')
             .where('ownerPhone', isEqualTo: "+966$input")
             .get();
-      }
-
       setStateSheet(() {
         _isSearching = false;
-        if (snapshot.docs.isEmpty) {
+        if (snapshot.docs.isEmpty)
           _searchError = "لم يتم العثور على نتائج.";
-        } else {
+        else
           _searchResults = snapshot.docs;
-        }
       });
     } catch (e) {
       setStateSheet(() {
         _isSearching = false;
-        _searchError = "خطأ في الاتصال: $e";
+        _searchError = "خطأ: $e";
       });
     }
+  }
+
+  Widget _buildStatCard(String title, String value, Object icon, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: [
+          BoxShadow(color: Colors.grey.withOpacity(0.1), blurRadius: 5),
+        ],
+      ),
+      child: Column(
+        children: [
+          icon is IconData
+              ? Icon(icon, color: color, size: 28)
+              : Text(
+                  icon.toString(),
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
+                ),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            style: GoogleFonts.tajawal(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: AppColors.textDark,
+            ),
+          ),
+          Text(
+            title,
+            style: GoogleFonts.cairo(fontSize: 12, color: AppColors.textLight),
+          ),
+        ],
+      ),
+    );
   }
 }

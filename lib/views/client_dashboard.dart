@@ -1,4 +1,6 @@
 // lib/views/client_dashboard.dart
+import 'dart:async'; // ✅ إضافة مكتبة الـ Async للمستمع
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
@@ -7,10 +9,12 @@ import 'package:intl/intl.dart';
 
 import '../colors.dart';
 import '../services/notification_service.dart';
+import 'add_car_screen.dart';
+import 'booking_screen.dart';
 import 'car_value_report_screen.dart';
 import 'client_bookings_screen.dart';
 import 'client_service_history_screen.dart';
-import 'client_store_screen.dart'; // ✅ استيراد صفحة المتجر الذكي
+import 'client_store_screen.dart';
 import 'login_screen.dart';
 import 'service_details_screen.dart';
 
@@ -28,10 +32,20 @@ class _ClientDashboardState extends State<ClientDashboard> {
   bool _isLoading = true;
   int _selectedCarIndex = 0;
 
+  // 🔴 مستمع الإشعارات الحي
+  StreamSubscription<QuerySnapshot>? _bookingsSub;
+  List<String> _currentPlates = [];
+
   @override
   void initState() {
     super.initState();
     _findCorrectPhoneNumber();
+  }
+
+  @override
+  void dispose() {
+    _bookingsSub?.cancel(); // إغلاق المستمع عند الخروج لحفظ البطارية
+    super.dispose();
   }
 
   Future<void> _findCorrectPhoneNumber() async {
@@ -63,7 +77,6 @@ class _ClientDashboardState extends State<ClientDashboard> {
         String carId = carDoc.id;
 
         FlutterBackgroundService().invoke("setCarId", {"carId": carId});
-        print("📲 تم إرسال معرف السيارة للخدمة بنجاح: $carId");
 
         if (mounted) {
           setState(() {
@@ -76,6 +89,104 @@ class _ClientDashboardState extends State<ClientDashboard> {
     }
 
     if (mounted) setState(() => _isLoading = false);
+  }
+
+  // 🔴 دالة الاستماع لحالة الحجوزات (القبول والرفض الفوري)
+  void _updateBookingsListener(List<String> plates) {
+    if (plates.isEmpty) return;
+    bool same =
+        plates.length == _currentPlates.length &&
+        plates.every((p) => _currentPlates.contains(p));
+    if (same) return; // لا تعد التشغيل إذا كانت السيارات هي نفسها
+
+    _currentPlates = plates;
+    _bookingsSub?.cancel();
+
+    _bookingsSub = FirebaseFirestore.instance
+        .collection('bookings')
+        .where('plateNumber', whereIn: plates.take(10).toList())
+        .snapshots()
+        .listen((snapshot) {
+          for (var doc in snapshot.docs) {
+            var data = doc.data() as Map<String, dynamic>;
+            String status = data['status'] ?? '';
+            bool isClientNotified =
+                data['isClientNotified'] ?? false; // حقل جديد للتحقق
+            String serviceName = data['serviceName'] ?? 'خدمة';
+            String id = doc.id;
+
+            // إذا كان الحجز مقبول أو مرفوض ولم يتم إشعار العميل بعد
+            if (!isClientNotified &&
+                (status == 'confirmed' || status == 'rejected')) {
+              // تحديث الفايربيز فوراً لمنع تكرار الإشعار
+              FirebaseFirestore.instance.collection('bookings').doc(id).update({
+                'isClientNotified': true,
+              });
+
+              if (status == 'confirmed') {
+                _showBookingAlert(
+                  id,
+                  'تم قبول موعدك! ✅',
+                  'وافقت الورشة على موعد خدمة ($serviceName). نحن بانتظارك!',
+                  Colors.green,
+                  Icons.check_circle,
+                );
+              } else if (status == 'rejected') {
+                _showBookingAlert(
+                  id,
+                  'نعتذر منك ❌',
+                  'الورشة غير متاحة لتقديم خدمة ($serviceName) في الوقت المحدد. يرجى حجز موعد آخر.',
+                  Colors.red,
+                  Icons.cancel,
+                );
+              }
+            }
+          }
+        });
+  }
+
+  void _showBookingAlert(
+    String docId,
+    String title,
+    String msg,
+    Color color,
+    IconData icon,
+  ) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        title: Row(
+          children: [
+            Icon(icon, color: color, size: 28),
+            const SizedBox(width: 10),
+            Flexible(
+              child: Text(
+                title,
+                style: GoogleFonts.cairo(
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Text(msg, style: GoogleFonts.cairo(fontSize: 15)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              "حسناً",
+              style: GoogleFonts.cairo(
+                color: Colors.grey,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -99,7 +210,6 @@ class _ClientDashboardState extends State<ClientDashboard> {
             icon: const Icon(Icons.logout, color: AppColors.danger),
             onPressed: () {
               FlutterBackgroundService().invoke("stopService");
-
               Navigator.pushReplacement(
                 context,
                 MaterialPageRoute(builder: (context) => const LoginScreen()),
@@ -135,6 +245,17 @@ class _ClientDashboardState extends State<ClientDashboard> {
 
                 if (cars.isEmpty) return _buildNoCarsFound();
 
+                // ✅ تشغيل المستمع للوحات السيارات الحالية
+                List<String> plates = cars
+                    .map(
+                      (c) => (c.data() as Map<String, dynamic>)['plate']
+                          .toString(),
+                    )
+                    .toList();
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _updateBookingsListener(plates);
+                });
+
                 cars.sort((a, b) {
                   var dA = a.data() as Map<String, dynamic>;
                   var dB = b.data() as Map<String, dynamic>;
@@ -161,6 +282,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
                     selectedCarData['clientName'] ?? 'عميلنا العزيز';
                 String make = selectedCarData['make'] ?? 'مركبة';
                 String model = selectedCarData['model'] ?? '';
+                String workshopId = selectedCarData['workshopId'] ?? '';
 
                 return SingleChildScrollView(
                   child: Column(
@@ -168,24 +290,24 @@ class _ClientDashboardState extends State<ClientDashboard> {
                       _buildHeader(clientName, "$make $model", plate),
                       const SizedBox(height: 10),
 
-                      // ✅ السلايدر الإعلاني للمتجر الذكي (تمت الإضافة هنا)
                       _buildOffersSlider(context, make, model),
                       const SizedBox(height: 10),
 
-                      if (cars.length > 1)
-                        SizedBox(
-                          height: 90,
-                          child: ListView.builder(
-                            scrollDirection: Axis.horizontal,
-                            padding: const EdgeInsets.symmetric(horizontal: 20),
-                            itemCount: cars.length,
-                            itemBuilder: (context, index) {
-                              var c =
-                                  cars[index].data() as Map<String, dynamic>;
-                              bool isSel = index == _selectedCarIndex;
+                      SizedBox(
+                        height: 90,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          itemCount: cars.length + 1,
+                          itemBuilder: (context, index) {
+                            if (index == cars.length) {
                               return GestureDetector(
-                                onTap: () =>
-                                    setState(() => _selectedCarIndex = index),
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const AddCarScreen(),
+                                  ),
+                                ),
                                 child: Container(
                                   margin: const EdgeInsets.only(right: 10),
                                   padding: const EdgeInsets.symmetric(
@@ -193,151 +315,205 @@ class _ClientDashboardState extends State<ClientDashboard> {
                                     vertical: 10,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: isSel
-                                        ? AppColors.primary
-                                        : Colors.white,
+                                    color: Colors.grey.shade100,
                                     borderRadius: BorderRadius.circular(10),
                                     border: Border.all(
-                                      color: isSel
-                                          ? AppColors.primary
-                                          : Colors.grey.shade300,
+                                      color: Colors.grey.shade300,
+                                      style: BorderStyle.solid,
                                     ),
-                                    boxShadow: isSel
-                                        ? [
-                                            BoxShadow(
-                                              color: AppColors.primary
-                                                  .withOpacity(0.2),
-                                              blurRadius: 5,
-                                            ),
-                                          ]
-                                        : [],
                                   ),
                                   child: Column(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      Icon(
-                                        Icons.directions_car,
-                                        color: isSel
-                                            ? Colors.white
-                                            : Colors.grey,
+                                      const Icon(
+                                        Icons.add_circle,
+                                        color: Colors.grey,
                                       ),
                                       Text(
-                                        c['plate'] ?? '',
-                                        style: TextStyle(
-                                          color: isSel
-                                              ? Colors.white
-                                              : Colors.black,
+                                        "إضافة سيارة",
+                                        style: GoogleFonts.cairo(
+                                          color: Colors.grey,
                                           fontWeight: FontWeight.bold,
+                                          fontSize: 12,
                                         ),
                                       ),
                                     ],
                                   ),
                                 ),
                               );
-                            },
-                          ),
-                        ),
-                      // قسم الخدمات الزمنية
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              "الصيانة الدورية",
-                              style: GoogleFonts.cairo(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 16,
+                            }
+
+                            var c = cars[index].data() as Map<String, dynamic>;
+                            bool isSel = index == _selectedCarIndex;
+                            return GestureDetector(
+                              onTap: () =>
+                                  setState(() => _selectedCarIndex = index),
+                              child: Container(
+                                margin: const EdgeInsets.only(right: 10),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 15,
+                                  vertical: 10,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: isSel
+                                      ? AppColors.primary
+                                      : Colors.white,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: isSel
+                                        ? AppColors.primary
+                                        : Colors.grey.shade300,
+                                  ),
+                                  boxShadow: isSel
+                                      ? [
+                                          BoxShadow(
+                                            color: AppColors.primary
+                                                .withOpacity(0.2),
+                                            blurRadius: 5,
+                                          ),
+                                        ]
+                                      : [],
+                                ),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.directions_car,
+                                      color: isSel ? Colors.white : Colors.grey,
+                                    ),
+                                    Text(
+                                      c['plate'] ?? '',
+                                      style: TextStyle(
+                                        color: isSel
+                                            ? Colors.white
+                                            : Colors.black,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 10),
-                            _buildTimeBasedServices(vin),
-                          ],
+                            );
+                          },
                         ),
                       ),
 
                       const SizedBox(height: 20),
-
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 20),
                         child: _buildSmartOilMeter(vin, currentKm),
                       ),
-
                       const SizedBox(height: 20),
 
-                      // الأزرار
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Row(
+                        child: Column(
                           children: [
-                            Expanded(
-                              child: _buildActionButton(
-                                "حجز موعد",
-                                Icons.calendar_month,
-                                Colors.orange,
-                                () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                          ClientBookingsScreen(
-                                            plateNumber: plate,
-                                          ),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _buildActionButton(
+                                    "حجز موعد جديد",
+                                    Icons.add_task,
+                                    Colors.orange.shade700,
+                                    () => _showServiceSelectionSheet(
+                                      context,
+                                      clientName,
+                                      plate,
+                                      workshopId,
                                     ),
-                                  );
-                                },
-                              ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: _buildActionButton(
+                                    "حجوزاتي",
+                                    Icons.calendar_month,
+                                    Colors.purple,
+                                    () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => ClientBookingsScreen(
+                                          plateNumber: plate,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: _buildActionButton(
-                                "السجل الكامل",
-                                Icons.history,
-                                Colors.blue,
-                                () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                          ClientServiceHistoryScreen(
-                                            carVin: vin,
-                                            plate: plate,
-                                          ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: _buildActionButton(
+                                    "السجل الكامل",
+                                    Icons.history,
+                                    Colors.blue,
+                                    () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            ClientServiceHistoryScreen(
+                                              carVin: vin,
+                                              plate: plate,
+                                            ),
+                                      ),
                                     ),
-                                  );
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: _buildActionButton(
-                                "قيمة سيارتي",
-                                Icons.verified,
-                                Colors.green,
-                                () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                          CarValueReportScreen(carId: vin),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: _buildActionButton(
+                                    "قيمة سيارتي",
+                                    Icons.verified,
+                                    Colors.green,
+                                    () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            CarValueReportScreen(carId: vin),
+                                      ),
                                     ),
-                                  );
-                                },
-                              ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
                       ),
-
                       const SizedBox(height: 25),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Text(
-                          "تفاصيل الخدمة الحالية",
-                          style: GoogleFonts.cairo(fontWeight: FontWeight.bold),
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            "الصيانة الدورية",
+                            style: GoogleFonts.cairo(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                            ),
+                          ),
                         ),
                       ),
-
+                      const SizedBox(height: 10),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: _buildTimeBasedServices(vin),
+                      ),
+                      const SizedBox(height: 25),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Align(
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            "تفاصيل الخدمة الحالية",
+                            style: GoogleFonts.cairo(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
                       _buildRecentServicesList(vin),
                       const SizedBox(height: 50),
                     ],
@@ -348,16 +524,88 @@ class _ClientDashboardState extends State<ClientDashboard> {
     );
   }
 
-  // --- Widgets ---
+  void _showServiceSelectionSheet(
+    BuildContext context,
+    String clientName,
+    String plate,
+    String workshopId,
+  ) {
+    List<String> services = [
+      'تغيير زيت المحرك',
+      'تغيير فحمات الفرامل',
+      'تغيير فلتر المكيف',
+      'فحص حاسوب (برمجة)',
+      'فحص شامل',
+      'أخرى',
+    ];
 
-  // ✅ 1. ويدجت السلايدر الإعلاني للمتجر
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                "اختر نوع الخدمة المطلوبة",
+                style: GoogleFonts.cairo(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Divider(color: Colors.grey.shade300),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: services.length,
+                  itemBuilder: (context, index) {
+                    return ListTile(
+                      leading: const Icon(
+                        Icons.build_circle,
+                        color: AppColors.primary,
+                      ),
+                      title: Text(
+                        services[index],
+                        style: GoogleFonts.cairo(fontWeight: FontWeight.bold),
+                      ),
+                      trailing: const Icon(Icons.arrow_forward_ios, size: 14),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => BookingScreen(
+                              serviceName: services[index],
+                              clientName: clientName,
+                              plateNumber: plate,
+                              workshopId: workshopId,
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildOffersSlider(BuildContext context, String make, String model) {
-    return Container(
-      height: 140,
-      margin: const EdgeInsets.symmetric(vertical: 10),
-      child: PageView(
-        controller: PageController(viewportFraction: 0.92),
-        children: [
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('spare_parts')
+          .where('isFeatured', isEqualTo: true)
+          .snapshots(),
+      builder: (context, snapshot) {
+        List<Widget> sliderItems = [
           _buildSliderCard(
             context: context,
             title: "المتجر الذكي 🛒",
@@ -368,22 +616,48 @@ class _ClientDashboardState extends State<ClientDashboard> {
             make: make,
             model: model,
           ),
-          _buildSliderCard(
-            context: context,
-            title: "عروض حصرية ٪",
-            subtitle: "خصومات خاصة على فلاتر وزيوت $make الأصلية",
-            color1: Colors.orange.shade800,
-            color2: Colors.orange.shade400,
-            icon: Icons.local_offer,
-            make: make,
-            model: model,
+        ];
+
+        if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
+          var compatibleFeatured = snapshot.data!.docs.where((doc) {
+            var data = doc.data() as Map<String, dynamic>;
+            List<dynamic> models = data['compatibleModels'] ?? [];
+            return models.any((m) {
+              String target = m.toString().toUpperCase();
+              return target.contains(make.toUpperCase()) ||
+                  target.contains(model.toUpperCase());
+            });
+          }).toList();
+
+          for (var part in compatibleFeatured) {
+            var data = part.data() as Map<String, dynamic>;
+            sliderItems.add(
+              _buildSliderCard(
+                context: context,
+                title: data['name'] ?? 'عرض خاص',
+                subtitle:
+                    "سعر حصري لملاك $model: ${data['discountPrice'] ?? data['price']} ﷼",
+                color1: Colors.orange.shade800,
+                color2: Colors.orange.shade400,
+                icon: Icons.local_offer,
+                make: make,
+                model: model,
+              ),
+            );
+          }
+        }
+        return Container(
+          height: 140,
+          margin: const EdgeInsets.symmetric(vertical: 10),
+          child: PageView(
+            controller: PageController(viewportFraction: 0.92),
+            children: sliderItems,
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
-  // ✅ 2. تصميم بطاقة السلايدر
   Widget _buildSliderCard({
     required BuildContext context,
     required String title,
@@ -395,16 +669,13 @@ class _ClientDashboardState extends State<ClientDashboard> {
     required String model,
   }) {
     return GestureDetector(
-      onTap: () {
-        // عند الضغط يذهب للمتجر الذكي ويمرر نوع سيارته
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) =>
-                ClientStoreScreen(carMake: make, carModel: model),
-          ),
-        );
-      },
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) =>
+              ClientStoreScreen(carMake: make, carModel: model),
+        ),
+      ),
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 5),
         padding: const EdgeInsets.all(20),
@@ -432,6 +703,8 @@ class _ClientDashboardState extends State<ClientDashboard> {
                 children: [
                   Text(
                     title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.cairo(
                       color: Colors.white,
                       fontSize: 18,
@@ -441,6 +714,8 @@ class _ClientDashboardState extends State<ClientDashboard> {
                   const SizedBox(height: 5),
                   Text(
                     subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: GoogleFonts.cairo(
                       color: Colors.white.withOpacity(0.9),
                       fontSize: 12,
@@ -539,14 +814,12 @@ class _ClientDashboardState extends State<ClientDashboard> {
         double driven = currentKm - lastKm;
         if (driven < 0) driven = 0;
         double remaining = limit - driven;
-
         double progress = (driven / limit).clamp(0.0, 1.0);
 
         if (progress >= 0.9) {
           Future.delayed(Duration.zero, () {
-            int notificationId = vin.hashCode;
             NotificationService().showWarningNotification(
-              id: notificationId,
+              id: vin.hashCode,
               title: "⚠️ تنبيه من مصون: زيت المحرك",
               body:
                   "استهلاك زيت سيارتك ($vin) وصل لنسبة حرجة. يرجى حجز موعد صيانة الآن لتجنب ضرر المحرك.",
@@ -559,17 +832,15 @@ class _ClientDashboardState extends State<ClientDashboard> {
             : (remaining > 0 ? Colors.orange : Colors.red);
 
         return GestureDetector(
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => ServiceDetailsScreen(
-                  serviceData: lastServiceData,
-                  carId: vin,
-                ),
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ServiceDetailsScreen(
+                serviceData: lastServiceData,
+                carId: vin,
               ),
-            );
-          },
+            ),
+          ),
           child: Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
@@ -652,21 +923,22 @@ class _ClientDashboardState extends State<ClientDashboard> {
     return InkWell(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
           color: color.withOpacity(0.1),
           borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: color.withOpacity(0.2)),
         ),
         child: Column(
           children: [
-            Icon(icon, color: color),
+            Icon(icon, color: color, size: 28),
             const SizedBox(height: 5),
             Text(
               title,
-              style: TextStyle(
+              style: GoogleFonts.cairo(
                 color: color,
                 fontWeight: FontWeight.bold,
-                fontSize: 11,
+                fontSize: 12,
               ),
               textAlign: TextAlign.center,
             ),
@@ -686,30 +958,25 @@ class _ClientDashboardState extends State<ClientDashboard> {
       builder: (context, snap) {
         if (!snap.hasData || snap.data!.docs.isEmpty)
           return const Text("لا توجد خدمات");
-
         var docs = snap.data!.docs;
         docs.sort(
           (a, b) =>
               (b['lastChangeDate'] as Timestamp).compareTo(a['lastChangeDate']),
         );
-
         var s = docs.first.data() as Map<String, dynamic>;
         String date = s['lastChangeDate'] != null
             ? DateFormat(
                 'yyyy-MM-dd',
               ).format((s['lastChangeDate'] as Timestamp).toDate())
             : '';
-
         return GestureDetector(
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) =>
-                    ServiceDetailsScreen(serviceData: s, carId: vin),
-              ),
-            );
-          },
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) =>
+                  ServiceDetailsScreen(serviceData: s, carId: vin),
+            ),
+          ),
           child: Container(
             margin: const EdgeInsets.only(bottom: 10, left: 20, right: 20),
             decoration: BoxDecoration(
@@ -750,9 +1017,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
           .snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) return const SizedBox();
-
         var docs = snapshot.data!.docs;
-
         Map<String, dynamic>? getLatestService(String type) {
           var specificDocs = docs.where((d) => d['type'] == type).toList();
           if (specificDocs.isEmpty) return null;
@@ -836,29 +1101,20 @@ class _ClientDashboardState extends State<ClientDashboard> {
         ),
       );
     }
-
     Timestamp lastDateTs = data['lastChangeDate'];
     DateTime lastDate = lastDateTs.toDate();
     DateTime expiryDate = lastDate.add(Duration(days: lifeSpanMonths * 30));
     DateTime now = DateTime.now();
-
     int totalDays = lifeSpanMonths * 30;
     int daysPassed = now.difference(lastDate).inDays;
     int daysRemaining = expiryDate.difference(now).inDays;
-
     double progress = (daysPassed / totalDays).clamp(0.0, 1.0);
-
-    Color statusColor = Colors.green;
-    String statusText = "حالة ممتازة";
-
-    if (progress > 0.9) {
-      statusColor = AppColors.danger;
-      statusText = "منتهية الصلاحية";
-    } else if (progress > 0.75) {
-      statusColor = Colors.orange;
-      statusText = "تغيير قريب";
-    }
-
+    Color statusColor = progress > 0.9
+        ? AppColors.danger
+        : (progress > 0.75 ? Colors.orange : Colors.green);
+    String statusText = progress > 0.9
+        ? "منتهية الصلاحية"
+        : (progress > 0.75 ? "تغيير قريب" : "حالة ممتازة");
     return Container(
       padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(

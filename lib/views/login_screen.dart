@@ -1,27 +1,25 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter/services.dart'; // مطلوب لاستخدام inputFormatters (لتقييد الإدخال)
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
-import '../viewmodels/login_vm.dart'; // تأكدي أن مسار الـ ViewModel صحيح
+import '../viewmodels/login_vm.dart';
 
 class LoginScreen extends StatelessWidget {
   const LoginScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // 1. حقن الـ ViewModel في الشاشة
+    // 1. ربط الشاشة بالـ ViewModel الخاص بها
     return ChangeNotifierProvider(
       create: (_) => LoginViewModel(),
       child: Scaffold(
-        // يسمح للشاشة بالتقلص عند ظهور لوحة المفاتيح
-        resizeToAvoidBottomInset: true,
-        // 2. المستهلك: يستمع لأي تغيير ويحدث الواجهة
+        resizeToAvoidBottomInset: true, // لرفع الشاشة عند فتح الكيبورد
         body: Consumer<LoginViewModel>(
           builder: (context, vm, child) {
             return Stack(
               children: [
-                // --- 1. الخلفية الثابتة (تتغير ألوانها بناءً على الدور) ---
+                // 🔴 الخلفية الذكية: يتغير لونها بناءً على دور المستخدم
                 Container(
                   height: double.infinity,
                   width: double.infinity,
@@ -29,14 +27,13 @@ class LoginScreen extends StatelessWidget {
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
+                      // ألوان داكنة للورشة، وألوان زرقاء للعميل
                       colors: vm.isWorkshopOwner
                           ? [Colors.blueGrey.shade900, Colors.blueGrey.shade700]
                           : [Colors.blue.shade900, Colors.blue.shade500],
                     ),
                   ),
                 ),
-
-                // --- 2. المحتوى القابل للتمرير ---
                 LayoutBuilder(
                   builder: (context, constraints) {
                     return SingleChildScrollView(
@@ -50,11 +47,13 @@ class LoginScreen extends StatelessWidget {
                           child: Padding(
                             padding: const EdgeInsets.all(20.0),
                             child: Container(
-                              constraints: const BoxConstraints(maxWidth: 500),
+                              constraints: const BoxConstraints(
+                                maxWidth: 500,
+                              ), // للحفاظ على التصميم في الشاشات الكبيرة
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  // الأيقونة (تتغير حسب الدور)
+                                  // أيقونة متغيرة حسب الدور
                                   Icon(
                                     vm.isWorkshopOwner
                                         ? Icons.build_circle
@@ -62,7 +61,6 @@ class LoginScreen extends StatelessWidget {
                                     size: 80,
                                     color: Colors.white,
                                   ),
-                                  // اسم التطبيق
                                   Text(
                                     "مصون",
                                     style: GoogleFonts.cairo(
@@ -71,7 +69,6 @@ class LoginScreen extends StatelessWidget {
                                       color: Colors.white,
                                     ),
                                   ),
-                                  // الوصف
                                   Text(
                                     vm.isWorkshopOwner
                                         ? "بوابة الشركاء والورش"
@@ -81,10 +78,9 @@ class LoginScreen extends StatelessWidget {
                                       color: Colors.white70,
                                     ),
                                   ),
-
                                   const SizedBox(height: 30),
 
-                                  // --- مفتاح التبديل (عميل / ورشة) ---
+                                  // أزرار التبديل (عميل / ورشة)
                                   Container(
                                     padding: const EdgeInsets.all(5),
                                     decoration: BoxDecoration(
@@ -101,7 +97,7 @@ class LoginScreen extends StatelessWidget {
                                   ),
                                   const SizedBox(height: 30),
 
-                                  // --- البطاقة البيضاء (منطقة الإدخال) ---
+                                  // 🔴 المربع الأبيض الذي يحتوي على الحقول
                                   Container(
                                     padding: const EdgeInsets.all(25),
                                     decoration: BoxDecoration(
@@ -112,7 +108,6 @@ class LoginScreen extends StatelessWidget {
                                       crossAxisAlignment:
                                           CrossAxisAlignment.stretch,
                                       children: [
-                                        // العنوان يتغير (تسجيل دخول / أدخل الرمز)
                                         Text(
                                           vm.otpSent
                                               ? "أدخل رمز التحقق"
@@ -126,12 +121,20 @@ class LoginScreen extends StatelessWidget {
                                         ),
                                         const SizedBox(height: 20),
 
-                                        // --- الحالة 1: قبل إرسال الرمز (إدخال الهاتف) ---
+                                        // 🔴 الحالة الأولى: إدخال رقم الجوال
                                         if (!vm.otpSent) ...[
                                           TextField(
-                                            controller: vm
-                                                .phoneController, // ✅ استخدام الكنترولر من الـ VM
-                                            keyboardType: TextInputType.phone,
+                                            controller: vm.phoneController,
+                                            keyboardType: TextInputType
+                                                .phone, // إظهار كيبورد الأرقام فقط
+                                            // 🔴 هذا الجزء هو الذي يمنع المستخدم من إدخال حروف أو أرقام أكثر من 10
+                                            inputFormatters: [
+                                              FilteringTextInputFormatter
+                                                  .digitsOnly, // يمنع المسافات والحروف والرموز
+                                              LengthLimitingTextInputFormatter(
+                                                10,
+                                              ), // يحدد الحد الأقصى بـ 10 أرقام
+                                            ],
                                             decoration: InputDecoration(
                                               labelText: "رقم الجوال",
                                               prefixIcon: const Icon(
@@ -145,12 +148,9 @@ class LoginScreen extends StatelessWidget {
                                             ),
                                           ),
                                           const SizedBox(height: 20),
-
-                                          // زر إرسال الرمز
                                           SizedBox(
                                             height: 50,
                                             child: ElevatedButton(
-                                              // ✅ تمرير الـ context للدالة لإظهار التنبيهات
                                               onPressed: vm.isLoading
                                                   ? null
                                                   : () => vm.sendOtp(context),
@@ -176,11 +176,10 @@ class LoginScreen extends StatelessWidget {
                                             ),
                                           ),
                                         ]
-                                        // --- الحالة 2: بعد إرسال الرمز (إدخال OTP) ---
+                                        // 🔴 الحالة الثانية: إدخال رمز التحقق (OTP)
                                         else ...[
                                           TextField(
-                                            controller: vm
-                                                .otpController, // ✅ استخدام الكنترولر من الـ VM
+                                            controller: vm.otpController,
                                             keyboardType: TextInputType.number,
                                             textAlign: TextAlign.center,
                                             style: const TextStyle(
@@ -195,19 +194,19 @@ class LoginScreen extends StatelessWidget {
                                                     BorderRadius.circular(10),
                                               ),
                                             ),
+                                            // 🔴 تقييد الرمز بـ 4 أرقام فقط
                                             inputFormatters: [
+                                              FilteringTextInputFormatter
+                                                  .digitsOnly,
                                               LengthLimitingTextInputFormatter(
                                                 4,
                                               ),
                                             ],
                                           ),
                                           const SizedBox(height: 20),
-
-                                          // زر الدخول النهائي
                                           SizedBox(
                                             height: 50,
                                             child: ElevatedButton(
-                                              // ✅ استدعاء دالة التحقق
                                               onPressed: () =>
                                                   vm.verifyOtp(context),
                                               style: ElevatedButton.styleFrom(
@@ -224,7 +223,6 @@ class LoginScreen extends StatelessWidget {
                                               ),
                                             ),
                                           ),
-                                          // زر التراجع لتغيير الرقم
                                           TextButton(
                                             onPressed: () =>
                                                 vm.changePhoneNumber(),
@@ -251,12 +249,11 @@ class LoginScreen extends StatelessWidget {
     );
   }
 
-  // --- دالة مساعدة لبناء أزرار التبديل (Tabs) ---
+  // تصميم أزرار التبديل (عميل/ورشة)
   Widget _buildRoleTab(LoginViewModel vm, String title, bool isWorkshop) {
     bool isSelected = vm.isWorkshopOwner == isWorkshop;
     return GestureDetector(
-      onTap: () =>
-          vm.toggleRole(isWorkshop), // ✅ استدعاء دالة التغيير في الـ VM
+      onTap: () => vm.toggleRole(isWorkshop),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),

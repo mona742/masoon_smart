@@ -7,7 +7,6 @@ import '../colors.dart';
 import 'booking_screen.dart';
 
 class ServiceDetailsScreen extends StatelessWidget {
-  // نستقبل بيانات الخدمة (الثابتة) ومعرف السيارة (لمراقبة العداد المتغير)
   final Map<String, dynamic> serviceData;
   final String carId;
 
@@ -19,7 +18,7 @@ class ServiceDetailsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 1. استخراج بيانات الخدمة الأساسية
+    // استخراج بيانات الخدمة الأساسية
     double lastChangeKm =
         double.tryParse(serviceData['lastChangeKm'].toString()) ?? 0.0;
     double limitKm =
@@ -27,7 +26,6 @@ class ServiceDetailsScreen extends StatelessWidget {
     String serviceName = serviceData['name'] ?? 'خدمة';
     String serviceType = serviceData['type'] ?? 'other';
 
-    // تنسيق التاريخ
     String lastDateStr = "---";
     if (serviceData['lastChangeDate'] != null) {
       lastDateStr = DateFormat(
@@ -35,7 +33,6 @@ class ServiceDetailsScreen extends StatelessWidget {
       ).format((serviceData['lastChangeDate'] as Timestamp).toDate());
     }
 
-    // تفاصيل إضافية (مثل نوع الزيت)
     Map<String, dynamic> details = serviceData['details'] ?? {};
 
     return Scaffold(
@@ -50,7 +47,6 @@ class ServiceDetailsScreen extends StatelessWidget {
         foregroundColor: Colors.black,
         elevation: 0,
       ),
-      // 📡 2. StreamBuilder: يراقب عداد السيارة الحي من الفايربيز
       body: StreamBuilder<DocumentSnapshot>(
         stream: FirebaseFirestore.instance
             .collection('cars')
@@ -65,23 +61,22 @@ class ServiceDetailsScreen extends StatelessWidget {
             return const Center(child: Text("خطأ: السيارة غير موجودة"));
           }
 
-          // ✅ جلب العداد الحي (الذي سيحدثه الـ GPS لاحقاً أو الورشة)
           var carData = snapshot.data!.data() as Map<String, dynamic>;
+
+          // ✅ 1. هنا السحر: استخراج بيانات العميل والسيارة والورشة من قاعدة البيانات
           double currentOdometer =
               double.tryParse(carData['currentKm'].toString()) ?? 0.0;
+          String clientName = carData['clientName'] ?? 'عميل مصون';
+          String plateNumber = carData['plate'] ?? 'غير معروف';
+          String workshopId =
+              carData['workshopId'] ?? ''; // المعرف السري للورشة
 
-          // 🧮 3. الحسابات الذكية الحية
           double drivenDistance = currentOdometer - lastChangeKm;
-          if (drivenDistance < 0)
-            drivenDistance = 0; // حماية من الأرقام السالبة
+          if (drivenDistance < 0) drivenDistance = 0;
 
           double remainingKm = limitKm - drivenDistance;
-          double progress = (drivenDistance / limitKm).clamp(
-            0.0,
-            1.0,
-          ); // نسبة من 0 إلى 1
+          double progress = (drivenDistance / limitKm).clamp(0.0, 1.0);
 
-          // تحديد الحالة والألوان
           bool isUrgent = remainingKm <= 0;
           Color statusColor = isUrgent
               ? AppColors.danger
@@ -99,7 +94,6 @@ class ServiceDetailsScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // --- 1. رأس الصفحة (العداد الحي الدائري) ---
                   Center(
                     child: Stack(
                       alignment: Alignment.center,
@@ -108,7 +102,7 @@ class ServiceDetailsScreen extends StatelessWidget {
                           width: 160,
                           height: 160,
                           child: CircularProgressIndicator(
-                            value: 1.0 - progress, // نعرض المتبقي
+                            value: 1.0 - progress,
                             strokeWidth: 12,
                             backgroundColor: Colors.grey[200],
                             valueColor: AlwaysStoppedAnimation<Color>(
@@ -124,7 +118,6 @@ class ServiceDetailsScreen extends StatelessWidget {
                               color: statusColor,
                             ),
                             const SizedBox(height: 5),
-                            // النسبة المئوية المتبقية
                             Text(
                               "${((1.0 - progress) * 100).toInt()}%",
                               style: GoogleFonts.tajawal(
@@ -147,7 +140,6 @@ class ServiceDetailsScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 20),
 
-                  // رسالة الحالة
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(15),
@@ -167,8 +159,6 @@ class ServiceDetailsScreen extends StatelessWidget {
                   ),
 
                   const SizedBox(height: 30),
-
-                  // --- 2. المواصفات الفنية والتفاصيل ---
                   Text(
                     "تفاصيل الخدمة",
                     style: GoogleFonts.cairo(
@@ -205,7 +195,6 @@ class ServiceDetailsScreen extends StatelessWidget {
                           "${lastChangeKm.toInt()} كم",
                         ),
                         const Divider(height: 25),
-                        // هذا الرقم يتحدث تلقائياً
                         _buildDetailRow(
                           Icons.speed,
                           "العداد الحالي (Live)",
@@ -219,7 +208,6 @@ class ServiceDetailsScreen extends StatelessWidget {
                           "${drivenDistance.toInt()} كم",
                         ),
 
-                        // التفاصيل الديناميكية (نوع الزيت، الماركة...)
                         if (details.isNotEmpty) ...[
                           const Divider(height: 25),
                           ...details.entries.map(
@@ -247,12 +235,29 @@ class ServiceDetailsScreen extends StatelessWidget {
                     height: 55,
                     child: ElevatedButton.icon(
                       onPressed: () {
-                        // الانتقال لحجز موعد جديد لنفس الخدمة
+                        // ✅ 2. حماية للمستخدم: التأكد من وجود ورشة مرتبطة بالسيارة
+                        if (workshopId.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                "عذراً، لم يتم العثور على الورشة المرتبطة بهذه السيارة.",
+                                style: GoogleFonts.cairo(),
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+
+                        // ✅ 3. تمرير كل البيانات المطلوبة بسلام
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (context) =>
-                                BookingScreen(serviceName: serviceName),
+                            builder: (context) => BookingScreen(
+                              serviceName: serviceName,
+                              clientName: clientName,
+                              plateNumber: plateNumber,
+                              workshopId: workshopId,
+                            ),
                           ),
                         );
                       },
@@ -286,7 +291,6 @@ class ServiceDetailsScreen extends StatelessWidget {
     );
   }
 
-  // صف عرض المعلومات
   Widget _buildDetailRow(
     IconData icon,
     String title,
@@ -317,11 +321,7 @@ class ServiceDetailsScreen extends StatelessWidget {
         ),
         if (isLive) ...[
           const SizedBox(width: 5),
-          const Icon(
-            Icons.radio_button_checked,
-            size: 12,
-            color: Colors.green,
-          ), // إشارة Live
+          const Icon(Icons.radio_button_checked, size: 12, color: Colors.green),
         ],
       ],
     );

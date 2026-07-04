@@ -111,10 +111,11 @@ class SparePart {
   final String name;
   final String sku; // رمز القطعة
   final double price;
+  final double? discountPrice; // ✅ حقل جديد: سعر العرض (اختياري)
   final int stockQuantity;
 
   // القائمة الذكية: هذه القطعة تركب على أي سيارات؟
-  // مثال: ["Toyota-Camry-2018-2022", "Lexus-ES-2019-2022"]
+  // مثال: ["TOYOTA", "CAMRY", "2022"]
   final List<String> compatibleModels;
 
   SparePart({
@@ -122,18 +123,18 @@ class SparePart {
     required this.name,
     required this.sku,
     required this.price,
+    this.discountPrice, // ✅ سعر العرض
     required this.stockQuantity,
     required this.compatibleModels,
   });
 
-  // دالة التحقق: هل تناسب هذه القطعة سيارة معينة؟
+  // ✅ دالة التحقق المطورة: هل تناسب هذه القطعة سيارة معينة؟
   bool isCompatibleWith(Car car) {
-    // منطق بسيط للتحقق من النص
-    // في الواقع يفضل فصل الماركة والموديل في حقول منفصلة
+    // نحول البيانات لنصوص كبيرة للمقارنة بدقة (Case Insensitive)
+    String carInfo = "${car.make} ${car.model} ${car.year}".toUpperCase();
+
     for (var modelString in compatibleModels) {
-      if (modelString.contains(car.make) &&
-          modelString.contains(car.model) &&
-          modelString.contains(car.year.toString())) {
+      if (carInfo.contains(modelString.toUpperCase())) {
         return true;
       }
     }

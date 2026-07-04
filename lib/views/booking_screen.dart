@@ -1,14 +1,24 @@
-import 'package:cloud_firestore/cloud_firestore.dart'; // استيراد الفايربيز
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 
 import '../colors.dart';
-import '../models/booking_model.dart'; // استيراد موديل الحجز
+import '../models/booking_model.dart';
 
 class BookingScreen extends StatefulWidget {
   final String serviceName;
+  final String clientName; // ✅ نستقبل الاسم الحقيقي
+  final String plateNumber; // ✅ نستقبل اللوحة الحقيقية
+  final String workshopId; // ✅ نستقبل الورشة المقصودة
 
-  const BookingScreen({super.key, required this.serviceName});
+  const BookingScreen({
+    super.key,
+    required this.serviceName,
+    required this.clientName,
+    required this.plateNumber,
+    required this.workshopId,
+  });
 
   @override
   State<BookingScreen> createState() => _BookingScreenState();
@@ -18,20 +28,52 @@ class _BookingScreenState extends State<BookingScreen> {
   DateTime _selectedDate = DateTime.now();
   String? _selectedTime;
   final TextEditingController _noteController = TextEditingController();
-  bool _isLoading = false; // حالة التحميل
+  bool _isLoading = false;
 
-  final List<String> _timeSlots = [
-    "09:00 ص",
-    "10:00 ص",
-    "11:00 ص",
-    "04:00 م",
-    "05:00 م",
-    "06:00 م",
-    "07:00 م",
+  // القائمة الكاملة للأوقات المتاحة
+  final List<String> _allTimeSlots = [
+    "09:00 AM",
+    "10:00 AM",
+    "11:00 AM",
+    "04:00 PM",
+    "05:00 PM",
+    "06:00 PM",
+    "07:00 PM",
   ];
+
+  // ✅ دالة ذكية تفلتر الأوقات (تخفي الأوقات التي مضت إذا كان الحجز لليوم)
+  List<String> get _availableTimeSlots {
+    if (_selectedDate.day != DateTime.now().day ||
+        _selectedDate.month != DateTime.now().month) {
+      return _allTimeSlots; // إذا كان الحجز في يوم قادم، أظهر كل الأوقات
+    }
+
+    // إذا كان الحجز اليوم، نقوم بفلترة الأوقات التي مضت
+    return _allTimeSlots.where((timeString) {
+      DateTime parsedTime = DateFormat("hh:mm a").parse(timeString);
+      DateTime slotDateTime = DateTime(
+        _selectedDate.year,
+        _selectedDate.month,
+        _selectedDate.day,
+        parsedTime.hour,
+        parsedTime.minute,
+      );
+      // أضفنا ساعة سماحية (لا يمكنك حجز موعد إلا إذا كان باقٍ عليه ساعة على الأقل)
+      return slotDateTime.isAfter(
+        DateTime.now().add(const Duration(minutes: 30)),
+      );
+    }).toList();
+  }
 
   @override
   Widget build(BuildContext context) {
+    List<String> currentSlots = _availableTimeSlots;
+
+    // إذا اختار العميل وقتاً ثم غير اليوم وأصبح الوقت غير متاح، نمسح التحديد
+    if (_selectedTime != null && !currentSlots.contains(_selectedTime)) {
+      _selectedTime = null;
+    }
+
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -44,7 +86,6 @@ class _BookingScreenState extends State<BookingScreen> {
         centerTitle: true,
         elevation: 0,
       ),
-      // إذا كان يحمل، نعرض دائرة التحميل، وإلا نعرض المحتوى
       body: _isLoading
           ? const Center(
               child: CircularProgressIndicator(color: AppColors.secondary),
@@ -55,7 +96,7 @@ class _BookingScreenState extends State<BookingScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // 1. ملخص الخدمة
+                    // ملخص الخدمة والسيارة
                     Container(
                       padding: const EdgeInsets.all(15),
                       decoration: BoxDecoration(
@@ -65,22 +106,52 @@ class _BookingScreenState extends State<BookingScreen> {
                           color: AppColors.primary.withOpacity(0.3),
                         ),
                       ),
-                      child: Row(
+                      child: Column(
                         children: [
-                          const Icon(Icons.bookmarks, color: AppColors.primary),
-                          const SizedBox(width: 10),
-                          Text(
-                            "الخدمة المطلوبة: ",
-                            style: GoogleFonts.cairo(
-                              color: AppColors.textLight,
-                            ),
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.build_circle,
+                                color: AppColors.primary,
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                "الخدمة: ",
+                                style: GoogleFonts.cairo(
+                                  color: AppColors.textLight,
+                                ),
+                              ),
+                              Text(
+                                widget.serviceName,
+                                style: GoogleFonts.cairo(
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.textDark,
+                                ),
+                              ),
+                            ],
                           ),
-                          Text(
-                            widget.serviceName,
-                            style: GoogleFonts.cairo(
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.textDark,
-                            ),
+                          const Divider(height: 20),
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.directions_car,
+                                color: AppColors.primary,
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                "المركبة: ",
+                                style: GoogleFonts.cairo(
+                                  color: AppColors.textLight,
+                                ),
+                              ),
+                              Text(
+                                widget.plateNumber,
+                                style: GoogleFonts.cairo(
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.textDark,
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -88,7 +159,7 @@ class _BookingScreenState extends State<BookingScreen> {
 
                     const SizedBox(height: 25),
 
-                    // 2. اختيار التاريخ
+                    // اختيار التاريخ
                     Text(
                       "اختر التاريخ",
                       style: GoogleFonts.cairo(
@@ -133,7 +204,7 @@ class _BookingScreenState extends State<BookingScreen> {
 
                     const SizedBox(height: 25),
 
-                    // 3. اختيار الوقت
+                    // اختيار الوقت (بعد الفلترة)
                     Text(
                       "اختر الوقت المناسب",
                       style: GoogleFonts.cairo(
@@ -143,56 +214,70 @@ class _BookingScreenState extends State<BookingScreen> {
                       ),
                     ),
                     const SizedBox(height: 10),
-                    GridView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 3,
-                            childAspectRatio: 2.5,
-                            crossAxisSpacing: 10,
-                            mainAxisSpacing: 10,
-                          ),
-                      itemCount: _timeSlots.length,
-                      itemBuilder: (context, index) {
-                        bool isSelected = _selectedTime == _timeSlots[index];
-                        return GestureDetector(
-                          onTap: () {
-                            setState(() {
-                              _selectedTime = _timeSlots[index];
-                            });
-                          },
-                          child: Container(
+                    currentSlots.isEmpty
+                        ? Container(
+                            padding: const EdgeInsets.all(15),
                             decoration: BoxDecoration(
-                              color: isSelected
-                                  ? AppColors.primary
-                                  : AppColors.cardBg,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: isSelected
-                                    ? AppColors.primary
-                                    : Colors.grey.shade300,
-                              ),
+                              color: Colors.red.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(10),
                             ),
-                            child: Center(
-                              child: Text(
-                                _timeSlots[index],
-                                style: GoogleFonts.tajawal(
-                                  color: isSelected
-                                      ? Colors.white
-                                      : AppColors.textDark,
-                                  fontWeight: FontWeight.bold,
+                            child: Text(
+                              "عذراً، لا توجد مواعيد متاحة بقية هذا اليوم، يرجى اختيار يوم آخر.",
+                              style: GoogleFonts.cairo(color: Colors.red),
+                            ),
+                          )
+                        : GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate:
+                                const SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: 3,
+                                  childAspectRatio: 2.5,
+                                  crossAxisSpacing: 10,
+                                  mainAxisSpacing: 10,
                                 ),
-                              ),
-                            ),
+                            itemCount: currentSlots.length,
+                            itemBuilder: (context, index) {
+                              bool isSelected =
+                                  _selectedTime == currentSlots[index];
+                              return GestureDetector(
+                                onTap: () => setState(
+                                  () => _selectedTime = currentSlots[index],
+                                ),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: isSelected
+                                        ? AppColors.primary
+                                        : AppColors.cardBg,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: isSelected
+                                          ? AppColors.primary
+                                          : Colors.grey.shade300,
+                                    ),
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      // استبدال AM/PM بعربي للعرض
+                                      currentSlots[index]
+                                          .replaceAll('AM', 'ص')
+                                          .replaceAll('PM', 'م'),
+                                      style: GoogleFonts.tajawal(
+                                        color: isSelected
+                                            ? Colors.white
+                                            : AppColors.textDark,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
                           ),
-                        );
-                      },
-                    ),
 
                     const SizedBox(height: 25),
 
-                    // 4. الملاحظات
+                    // الملاحظات
                     Text(
                       "ملاحظات (اختياري)",
                       style: GoogleFonts.cairo(
@@ -222,7 +307,7 @@ class _BookingScreenState extends State<BookingScreen> {
 
                     const SizedBox(height: 30),
 
-                    // 5. زر التأكيد الحقيقي
+                    // زر التأكيد
                     SizedBox(
                       width: double.infinity,
                       height: 55,
@@ -259,13 +344,10 @@ class _BookingScreenState extends State<BookingScreen> {
       lastDate: DateTime.now().add(const Duration(days: 30)),
     );
     if (picked != null && picked != _selectedDate) {
-      setState(() {
-        _selectedDate = picked;
-      });
+      setState(() => _selectedDate = picked);
     }
   }
 
-  // ✅ دالة الحجز المتصلة بالفايربيز
   Future<void> _confirmBooking() async {
     if (_selectedTime == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -279,24 +361,24 @@ class _BookingScreenState extends State<BookingScreen> {
       return;
     }
 
-    setState(() => _isLoading = true); // بدء التحميل
+    setState(() => _isLoading = true);
 
     try {
-      // 1. تجهيز بيانات الحجز
-      // ملاحظة: نستخدم بيانات ثابتة للعميل واللوحة مؤقتاً (نفس المستخدمة في الداشبورد)
+      // ✅ 1. استخدام البيانات الحقيقية القادمة من المتغيرات
       final booking = BookingModel(
-        id: '', // تلقائي
+        id: '',
         serviceName: widget.serviceName,
-        clientName: "أحمد محمد",
-        plateNumber: "1234 س ح ط ", // يجب أن يطابق رقم الداشبورد
+        clientName: widget.clientName, // الديناميكي
+        plateNumber: widget.plateNumber, // الديناميكي
+        workshopId: widget.workshopId, // ✅ الديناميكي والمهم جداً
         bookingDate: _selectedDate,
-        bookingTime: _selectedTime!,
+        bookingTime: _selectedTime!.replaceAll('AM', 'ص').replaceAll('PM', 'م'),
         notes: _noteController.text,
-        status: 'pending', // الحالة الافتراضية: قيد الانتظار
+        status: 'pending',
         createdAt: DateTime.now(),
       );
 
-      // 2. الإرسال إلى Firestore (جدول bookings)
+      // 2. الإرسال إلى الفايربيز
       await FirebaseFirestore.instance
           .collection('bookings')
           .add(booking.toMap());
@@ -306,7 +388,7 @@ class _BookingScreenState extends State<BookingScreen> {
       // 3. نجاح
       showDialog(
         context: context,
-        barrierDismissible: false, // منع الإغلاق بالضغط خارج الصندوق
+        barrierDismissible: false,
         builder: (ctx) => AlertDialog(
           title: const Icon(Icons.check_circle, color: Colors.green, size: 60),
           content: Column(
@@ -331,8 +413,8 @@ class _BookingScreenState extends State<BookingScreen> {
           actions: [
             TextButton(
               onPressed: () {
-                Navigator.pop(ctx); // إغلاق الديالوج
-                Navigator.pop(context); // العودة للرئيسية
+                Navigator.pop(ctx);
+                Navigator.pop(context); // العودة للشاشة السابقة
               },
               child: Text(
                 "حسناً",
