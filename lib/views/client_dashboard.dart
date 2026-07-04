@@ -1,5 +1,5 @@
 // lib/views/client_dashboard.dart
-import 'dart:async'; // ✅ إضافة مكتبة الـ Async للمستمع
+import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -32,7 +32,6 @@ class _ClientDashboardState extends State<ClientDashboard> {
   bool _isLoading = true;
   int _selectedCarIndex = 0;
 
-  // 🔴 مستمع الإشعارات الحي
   StreamSubscription<QuerySnapshot>? _bookingsSub;
   List<String> _currentPlates = [];
 
@@ -44,7 +43,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
 
   @override
   void dispose() {
-    _bookingsSub?.cancel(); // إغلاق المستمع عند الخروج لحفظ البطارية
+    _bookingsSub?.cancel();
     super.dispose();
   }
 
@@ -91,13 +90,12 @@ class _ClientDashboardState extends State<ClientDashboard> {
     if (mounted) setState(() => _isLoading = false);
   }
 
-  // 🔴 دالة الاستماع لحالة الحجوزات (القبول والرفض الفوري)
   void _updateBookingsListener(List<String> plates) {
     if (plates.isEmpty) return;
     bool same =
         plates.length == _currentPlates.length &&
         plates.every((p) => _currentPlates.contains(p));
-    if (same) return; // لا تعد التشغيل إذا كانت السيارات هي نفسها
+    if (same) return;
 
     _currentPlates = plates;
     _bookingsSub?.cancel();
@@ -110,15 +108,12 @@ class _ClientDashboardState extends State<ClientDashboard> {
           for (var doc in snapshot.docs) {
             var data = doc.data() as Map<String, dynamic>;
             String status = data['status'] ?? '';
-            bool isClientNotified =
-                data['isClientNotified'] ?? false; // حقل جديد للتحقق
+            bool isClientNotified = data['isClientNotified'] ?? false;
             String serviceName = data['serviceName'] ?? 'خدمة';
             String id = doc.id;
 
-            // إذا كان الحجز مقبول أو مرفوض ولم يتم إشعار العميل بعد
             if (!isClientNotified &&
                 (status == 'confirmed' || status == 'rejected')) {
-              // تحديث الفايربيز فوراً لمنع تكرار الإشعار
               FirebaseFirestore.instance.collection('bookings').doc(id).update({
                 'isClientNotified': true,
               });
@@ -207,7 +202,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
         automaticallyImplyLeading: false,
         actions: [
           IconButton(
-            icon: const Icon(Icons.logout, color: AppColors.danger),
+            icon: const Icon(Icons.logout, color: Colors.red),
             onPressed: () {
               FlutterBackgroundService().invoke("stopService");
               Navigator.pushReplacement(
@@ -245,7 +240,6 @@ class _ClientDashboardState extends State<ClientDashboard> {
 
                 if (cars.isEmpty) return _buildNoCarsFound();
 
-                // ✅ تشغيل المستمع للوحات السيارات الحالية
                 List<String> plates = cars
                     .map(
                       (c) => (c.data() as Map<String, dynamic>)['plate']
@@ -524,12 +518,26 @@ class _ClientDashboardState extends State<ClientDashboard> {
     );
   }
 
+  // ✅ النافذة المنبثقة لاختيار الخدمة (مدمج معها قفل الأمان)
   void _showServiceSelectionSheet(
     BuildContext context,
     String clientName,
     String plate,
     String workshopId,
   ) {
+    if (workshopId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "⚠️ عذراً، هذه السيارة غير مرتبطة بورشة محددة حتى الآن. يرجى التواصل مع الورشة لربط سيارتك.",
+            style: GoogleFonts.cairo(fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     List<String> services = [
       'تغيير زيت المحرك',
       'تغيير فحمات الفرامل',
@@ -598,6 +606,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
     );
   }
 
+  // --- بقية الدوال المساعدة داخل الكلاس ---
   Widget _buildOffersSlider(BuildContext context, String make, String model) {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
@@ -773,8 +782,8 @@ class _ClientDashboardState extends State<ClientDashboard> {
           .where('type', isEqualTo: 'oil')
           .snapshots(),
       builder: (context, snapshot) {
-        double limit = 5000;
-        double lastKm = 0;
+        double limit = 5000.0;
+        double lastKm = 0.0;
         Map<String, dynamic> lastServiceData = {};
 
         if (snapshot.hasData && snapshot.data!.docs.isNotEmpty) {
@@ -786,9 +795,10 @@ class _ClientDashboardState extends State<ClientDashboard> {
           );
           lastServiceData = docs.first.data() as Map<String, dynamic>;
           lastKm =
-              double.tryParse(lastServiceData['lastChangeKm'].toString()) ?? 0;
+              double.tryParse(lastServiceData['lastChangeKm'].toString()) ??
+              0.0;
           limit =
-              double.tryParse(lastServiceData['limitKm'].toString()) ?? 5000;
+              double.tryParse(lastServiceData['limitKm'].toString()) ?? 5000.0;
         } else {
           return Container(
             padding: const EdgeInsets.all(20),
@@ -812,7 +822,7 @@ class _ClientDashboardState extends State<ClientDashboard> {
         }
 
         double driven = currentKm - lastKm;
-        if (driven < 0) driven = 0;
+        if (driven < 0) driven = 0.0;
         double remaining = limit - driven;
         double progress = (driven / limit).clamp(0.0, 1.0);
 
@@ -1109,12 +1119,14 @@ class _ClientDashboardState extends State<ClientDashboard> {
     int daysPassed = now.difference(lastDate).inDays;
     int daysRemaining = expiryDate.difference(now).inDays;
     double progress = (daysPassed / totalDays).clamp(0.0, 1.0);
+
     Color statusColor = progress > 0.9
-        ? AppColors.danger
+        ? Colors.red
         : (progress > 0.75 ? Colors.orange : Colors.green);
     String statusText = progress > 0.9
         ? "منتهية الصلاحية"
         : (progress > 0.75 ? "تغيير قريب" : "حالة ممتازة");
+
     return Container(
       padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
