@@ -51,14 +51,13 @@
    git clone [https://github.com/your-username/masoon-smart.git](https://github.com/your-username/masoon-smart.git)
 
 Navigate to project directory:
-
-Bash
 cd masoon-smart
+
 Install dependencies:
-
-Bash
 flutter pub get
-Run the app:
 
-Bash
+Run the app:
 flutter run
+
+👩‍💻 Author (المطورة)
+Developed with 💙 by Mona (Software Engineer & Mobile App Developer).
